@@ -38,12 +38,12 @@ ALL_SYMBOLS = ["GOOGL", "NVDA", "TSMC", "BABA", "SPY", "FXI", "KWEB"]
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_latest_prices(db: Database) -> pd.DataFrame:
+def get_latest_prices(_db: Database) -> pd.DataFrame:
     """Get latest prices for all portfolio symbols."""
     all_prices = []
-    
+
     for symbol in ALL_SYMBOLS:
-        df = db.get_latest_prices(symbol, days=1)
+        df = _db.get_latest_prices(symbol, days=1)
         if not df.empty:
             all_prices.append(df.iloc[-1])
     
@@ -54,9 +54,9 @@ def get_latest_prices(db: Database) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
-def get_price_history(symbol: str, db: Database, days: int = 90) -> pd.DataFrame:
+def get_price_history(symbol: str, _db: Database, days: int = 90) -> pd.DataFrame:
     """Get price history for a symbol."""
-    df = db.get_latest_prices(symbol, days=days)
+    df = _db.get_latest_prices(symbol, days=days)
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'])
         df = df.sort_values('date')
@@ -64,27 +64,28 @@ def get_price_history(symbol: str, db: Database, days: int = 90) -> pd.DataFrame
 
 
 @st.cache_data(ttl=3600)
-def get_economic_indicators(db: Database) -> pd.DataFrame:
+def get_economic_indicators(_db: Database) -> pd.DataFrame:
     """Get latest economic indicators."""
     query = """
     SELECT series_id, date, value
     FROM economic_indicators e1
     WHERE date = (
-        SELECT MAX(date) FROM economic_indicators e2 
+        SELECT MAX(date) FROM economic_indicators e2
         WHERE e2.series_id = e1.series_id
     )
     ORDER BY series_id
     """
-    with sqlite3.connect(db.db_path) as conn:
+    with sqlite3.connect(_db.db_path) as conn:
         return pd.read_sql_query(query, conn)
 
 
 @st.cache_data(ttl=3600)
-def get_sec_filings(symbol: str, db: Database, limit: int = 10) -> pd.DataFrame:
+def get_sec_filings(symbol: str, _db: Database, limit: int = 10) -> pd.DataFrame:
     """Get latest SEC filings for a symbol."""
     import glob
-    
-    pattern = str(db.sec_dir / f"{symbol}_sec_filings_*.parquet")
+
+    sec_dir = Path(__file__).parent / "data" / "sec"
+    pattern = str(sec_dir / f"{symbol}_sec_filings_*.parquet")
     files = sorted(glob.glob(pattern))
     
     if not files:
