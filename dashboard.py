@@ -10,9 +10,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from shared import get_db, render_sidebar_controls
-
 from config import WATCHLIST
+from shared import get_db, render_sidebar_controls
 
 # Page config
 st.set_page_config(

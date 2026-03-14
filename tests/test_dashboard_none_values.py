@@ -111,15 +111,7 @@ class TestDashboardNoneIndicatorValues:
             "FEDFUNDS": None,
         })
 
-        friendly_names = {
-            "VIXCLS": "VIX (Volatility)",
-            "DGS10": "10Y Treasury",
-            "T10Y2Y": "Yield Curve (10Y-2Y)",
-            "FEDFUNDS": "Fed Funds Rate",
-        }
-        key_indicators = ["VIXCLS", "DGS10", "T10Y2Y", "FEDFUNDS"]
-
-        for series_id in key_indicators:
+        for series_id in ["VIXCLS", "DGS10", "T10Y2Y", "FEDFUNDS"]:
             row = econ_df[econ_df["series_id"] == series_id]
             if not row.empty:
                 value = row["value"].iloc[-1]
