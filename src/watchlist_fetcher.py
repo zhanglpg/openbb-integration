@@ -64,6 +64,7 @@ class WatchlistFetcher:
     def fetch_fundamentals(self, symbol: str) -> Optional[pd.DataFrame]:
         """Fetch fundamental metrics for a symbol."""
         try:
+
             def _call():
                 return obb.equity.fundamental.metrics(symbol=symbol)
 
@@ -83,6 +84,7 @@ class WatchlistFetcher:
         if limit is None:
             limit = PIPELINE_DEFAULTS["sec_filing_limit"]
         try:
+
             def _call():
                 return obb.equity.fundamental.filings(symbol=symbol, provider="sec")
 
@@ -198,7 +200,8 @@ class WatchlistFetcher:
 
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
     fetcher = WatchlistFetcher()

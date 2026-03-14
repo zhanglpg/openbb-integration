@@ -28,6 +28,7 @@ class DataFetcher:
     ) -> pd.DataFrame:
         """Fetch historical price data."""
         try:
+
             def _call():
                 return obb.equity.price.historical(
                     symbol, provider=provider, start_date=start_date, end_date=end_date
@@ -44,6 +45,7 @@ class DataFetcher:
     def fetch_income_statement(self, symbol: str, provider: str = "yfinance") -> pd.DataFrame:
         """Fetch income statement."""
         try:
+
             def _call():
                 return obb.equity.fundamental.income(symbol, provider=provider)
 
@@ -58,6 +60,7 @@ class DataFetcher:
     def fetch_balance_sheet(self, symbol: str, provider: str = "yfinance") -> pd.DataFrame:
         """Fetch balance sheet."""
         try:
+
             def _call():
                 return obb.equity.fundamental.balance(symbol, provider=provider)
 
@@ -72,6 +75,7 @@ class DataFetcher:
     def fetch_cash_flow(self, symbol: str, provider: str = "yfinance") -> pd.DataFrame:
         """Fetch cash flow statement."""
         try:
+
             def _call():
                 return obb.equity.fundamental.cash(symbol, provider=provider)
 
@@ -86,6 +90,7 @@ class DataFetcher:
     def fetch_metrics(self, symbol: str, provider: str = "yfinance") -> pd.DataFrame:
         """Fetch key financial metrics."""
         try:
+
             def _call():
                 return obb.equity.fundamental.metrics(symbol, provider=provider)
 
@@ -102,6 +107,7 @@ class DataFetcher:
     ) -> pd.DataFrame:
         """Fetch SEC filings."""
         try:
+
             def _call():
                 return obb.equity.fundamental.filings(symbol, provider=provider)
 
@@ -117,6 +123,7 @@ class DataFetcher:
     def fetch_profile(self, symbol: str, provider: str = "yfinance") -> dict:
         """Fetch company profile."""
         try:
+
             def _call():
                 return obb.equity.profile(symbol, provider=provider)
 

@@ -30,6 +30,7 @@ class SECParser:
     ) -> pd.DataFrame:
         """Fetch SEC filings for a symbol."""
         try:
+
             def _call():
                 return obb.equity.fundamental.filings(symbol=symbol, provider="sec")
 
@@ -204,7 +205,8 @@ class SECParser:
 
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
     parser = SECParser()

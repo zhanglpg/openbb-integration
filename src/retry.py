@@ -12,7 +12,14 @@ T = TypeVar("T")
 
 # Exception types that indicate transient failures worth retrying
 _TRANSIENT_MARKERS = (
-    "timeout", "timed out", "connection", "429", "500", "502", "503", "rate limit",
+    "timeout",
+    "timed out",
+    "connection",
+    "429",
+    "500",
+    "502",
+    "503",
+    "rate limit",
 )
 
 
@@ -55,7 +62,7 @@ def retry_fetch(
             last_exc = e
             if not _is_transient(e) or attempt >= max_retries:
                 raise
-            wait = backoff_base ** attempt
+            wait = backoff_base**attempt
             logger.warning(
                 "%s failed (attempt %d/%d): %s — retrying in %.1fs",
                 description,

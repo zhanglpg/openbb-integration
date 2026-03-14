@@ -107,6 +107,20 @@ class TestEconomicDashboard:
         assert not result.empty
         assert "series_id" in result.columns
 
+    def test_get_economic_summary_multiple_series(self, sample_economic_df):
+        """Regression: get_economic_summary must return latest value per series.
+        Original bug: Path.connect() crash; fix delegates to db.get_latest_economic_indicators()."""
+        self.dashboard.db.save_economic_indicators(sample_economic_df, "GDP")
+        self.dashboard.db.save_economic_indicators(sample_economic_df, "CPI")
+        self.dashboard.db.save_economic_indicators(sample_economic_df, "UNRATE")
+        result = self.dashboard.get_economic_summary()
+        assert len(result) == 3
+        assert set(result["series_id"]) == {"GDP", "CPI", "UNRATE"}
+        # Each row should have the latest date from the sample data
+        for _, row in result.iterrows():
+            assert pd.notna(row["value"])
+            assert pd.notna(row["date"])
+
     def test_generate_dashboard_report_empty(self):
         # All fetches return None
         self.mock_obb.economy.gdp.real.side_effect = Exception("no data")
