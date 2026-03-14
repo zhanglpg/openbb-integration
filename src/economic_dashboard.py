@@ -20,6 +20,54 @@ from retry import retry_fetch
 logger = logging.getLogger(__name__)
 
 
+def _normalize_dataframe(df: pd.DataFrame, series_id: str = "") -> pd.DataFrame:
+    """Normalize an OpenBB DataFrame to have 'date' and 'value' columns.
+
+    OpenBB endpoints return DataFrames with varying column names (e.g., the
+    series symbol like 'VIXCLS', or 'close', 'rate', etc.).  This function
+    standardises the output so downstream consumers always see 'date' and
+    'value'.
+    """
+    df = df.copy()
+
+    # --- Normalize date ---
+    if isinstance(df.index, pd.DatetimeIndex) or df.index.name in ("date", "Date", "period"):
+        df = df.reset_index()
+    for col in list(df.columns):
+        if col.lower() in ("date", "period"):
+            if col != "date":
+                df = df.rename(columns={col: "date"})
+            break
+
+    # --- Normalize value ---
+    if "value" not in df.columns:
+        # Priority: series-specific column > known aliases > first numeric
+        candidates = []
+        if series_id and series_id in df.columns:
+            candidates.append(series_id)
+        candidates.extend(["close", "Close", "Value", "rate", "Rate"])
+        renamed = False
+        for c in candidates:
+            if c in df.columns:
+                df = df.rename(columns={c: "value"})
+                renamed = True
+                break
+        if not renamed:
+            exclude = {"series_id", "fetched_at", "date"}
+            numeric = [
+                c for c in df.select_dtypes(include="number").columns if c not in exclude
+            ]
+            if numeric:
+                df = df.rename(columns={numeric[0]: "value"})
+            else:
+                logger.warning(
+                    "No numeric column found for 'value' in DataFrame with columns: %s",
+                    list(df.columns),
+                )
+
+    return df
+
+
 class EconomicDashboard:
     """Dashboard for economic indicators and macro data."""
 
@@ -50,12 +98,21 @@ class EconomicDashboard:
 
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
+                df = _normalize_dataframe(df, series_id=series_id)
                 df["series_id"] = series_id
                 df["fetched_at"] = datetime.now().isoformat()
                 return df
 
         except Exception as e:
-            logger.error("Error fetching FRED series %s: %s", series_id, e)
+            err_msg = str(e).lower()
+            if "api key" in err_msg or "unauthorized" in err_msg or "credential" in err_msg:
+                logger.error(
+                    "FRED API key not configured for %s. "
+                    "Set it in ~/.openbb_platform/user_settings.json",
+                    series_id,
+                )
+            else:
+                logger.error("Error fetching FRED series %s: %s", series_id, e)
         return None
 
     def fetch_gdp_real(self) -> Optional[pd.DataFrame]:
@@ -69,6 +126,7 @@ class EconomicDashboard:
 
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
+                df = _normalize_dataframe(df)
                 df["fetched_at"] = datetime.now().isoformat()
                 return df
 
@@ -87,6 +145,7 @@ class EconomicDashboard:
 
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
+                df = _normalize_dataframe(df)
                 df["fetched_at"] = datetime.now().isoformat()
                 return df
 
@@ -105,6 +164,7 @@ class EconomicDashboard:
 
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
+                df = _normalize_dataframe(df)
                 df["fetched_at"] = datetime.now().isoformat()
                 return df
 
@@ -123,6 +183,7 @@ class EconomicDashboard:
 
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
+                df = _normalize_dataframe(df)
                 df["fetched_at"] = datetime.now().isoformat()
                 return df
 
@@ -141,6 +202,7 @@ class EconomicDashboard:
 
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
+                df = _normalize_dataframe(df)
                 df["fetched_at"] = datetime.now().isoformat()
                 return df
 

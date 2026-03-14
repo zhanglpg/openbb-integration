@@ -5,6 +5,63 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
+from economic_dashboard import _normalize_dataframe
+
+
+class TestNormalizeDataframe:
+    """Tests for _normalize_dataframe() — column name normalisation."""
+
+    def test_passthrough_when_columns_already_correct(self):
+        df = pd.DataFrame({"date": ["2024-01-01"], "value": [42.0]})
+        result = _normalize_dataframe(df)
+        assert "date" in result.columns
+        assert "value" in result.columns
+        assert result["value"].iloc[0] == 42.0
+
+    def test_series_symbol_as_value_column(self):
+        """FRED returns value column named after the series (e.g. 'VIXCLS')."""
+        df = pd.DataFrame({"date": ["2024-01-01"], "VIXCLS": [18.5]})
+        result = _normalize_dataframe(df, series_id="VIXCLS")
+        assert "value" in result.columns
+        assert result["value"].iloc[0] == 18.5
+
+    def test_close_column_renamed_to_value(self):
+        df = pd.DataFrame({"date": ["2024-01-01"], "close": [155.0]})
+        result = _normalize_dataframe(df)
+        assert "value" in result.columns
+        assert result["value"].iloc[0] == 155.0
+
+    def test_datetime_index_reset(self):
+        dates = pd.to_datetime(["2024-01-01", "2024-02-01"])
+        df = pd.DataFrame({"value": [1.0, 2.0]}, index=dates)
+        df.index.name = "date"
+        result = _normalize_dataframe(df)
+        assert "date" in result.columns
+        assert "value" in result.columns
+        assert len(result) == 2
+
+    def test_fallback_to_first_numeric_column(self):
+        df = pd.DataFrame({"date": ["2024-01-01"], "some_metric": [99.9]})
+        result = _normalize_dataframe(df)
+        assert "value" in result.columns
+        assert result["value"].iloc[0] == 99.9
+
+    def test_period_column_renamed_to_date(self):
+        df = pd.DataFrame({"period": ["2024-01-01"], "value": [7.5]})
+        result = _normalize_dataframe(df)
+        assert "date" in result.columns
+        assert result["date"].iloc[0] == "2024-01-01"
+
+    def test_series_id_takes_priority_over_close(self):
+        """When both the series column and 'close' exist, prefer series_id."""
+        df = pd.DataFrame({
+            "date": ["2024-01-01"],
+            "DGS10": [4.25],
+            "close": [100.0],
+        })
+        result = _normalize_dataframe(df, series_id="DGS10")
+        assert result["value"].iloc[0] == 4.25
+
 
 class TestEconomicDashboard:
     @pytest.fixture(autouse=True)
@@ -41,6 +98,18 @@ class TestEconomicDashboard:
         self.dashboard.fetch_fred_series("GDP", start_date="2024-01-01", end_date="2024-12-31")
         call_kwargs = self.mock_obb.economy.fred_series.call_args.kwargs
         assert call_kwargs["start_date"] == "2024-01-01"
+
+    def test_fetch_fred_series_symbol_column(self):
+        """Regression: FRED returns value in a column named after the series."""
+        df = pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=3, freq="MS"),
+            "VIXCLS": [18.5, 19.0, 17.8],
+        })
+        self.mock_obb.economy.fred_series.return_value = self._make_result(df)
+        result = self.dashboard.fetch_fred_series("VIXCLS")
+        assert result is not None
+        assert "value" in result.columns
+        assert result["value"].iloc[0] == 18.5
 
     def test_fetch_fred_series_error(self):
         self.mock_obb.economy.fred_series.side_effect = Exception("API error")
@@ -120,6 +189,53 @@ class TestEconomicDashboard:
         for _, row in result.iterrows():
             assert pd.notna(row["value"])
             assert pd.notna(row["date"])
+
+    def test_fred_symbol_column_full_roundtrip(self):
+        """Regression: FRED data with symbol-named column flows through
+        fetch → normalize → save → read and returns non-NULL values."""
+        # Simulate FRED returning data with the series symbol as column name
+        fred_df = pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=5, freq="MS"),
+            "VIXCLS": [18.5, 19.0, 17.8, 20.1, 16.3],
+        })
+        self.mock_obb.economy.fred_series.return_value = self._make_result(fred_df)
+
+        # Step 1: Fetch (normalizes columns internally)
+        fetched = self.dashboard.fetch_fred_series("VIXCLS")
+        assert fetched is not None
+        assert "value" in fetched.columns
+        assert fetched["value"].notna().all()
+
+        # Step 2: Save to DB
+        self.dashboard.db.save_economic_indicators(fetched, "VIXCLS")
+
+        # Step 3: Read back via the same path the dashboard uses
+        result = self.dashboard.db.get_latest_economic_indicators(["VIXCLS"])
+        assert len(result) == 1
+        assert result["series_id"].iloc[0] == "VIXCLS"
+        assert pd.notna(result["value"].iloc[0])
+        assert result["value"].iloc[0] == 16.3  # latest value
+
+    def test_partial_series_in_db(self):
+        """Dashboard handles DB having data for some series but not others."""
+        # Save data for only 2 of the 4 key indicators
+        df = pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=3, freq="MS"),
+            "value": [4.25, 4.30, 4.35],
+        })
+        self.dashboard.db.save_economic_indicators(df, "DGS10")
+        self.dashboard.db.save_economic_indicators(df, "FEDFUNDS")
+
+        # Request all 4 key indicators — should return only the 2 that exist
+        result = self.dashboard.db.get_latest_economic_indicators(
+            ["VIXCLS", "DGS10", "T10Y2Y", "FEDFUNDS"]
+        )
+        assert len(result) == 2
+        assert set(result["series_id"]) == {"DGS10", "FEDFUNDS"}
+        # Values should be non-NULL
+        for _, row in result.iterrows():
+            assert pd.notna(row["value"])
+            assert row["value"] == 4.35
 
     def test_generate_dashboard_report_empty(self):
         # All fetches return None

@@ -415,6 +415,18 @@ class Database:
         if "date" in df.columns:
             df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
 
+        # Defensive: if 'value' column is missing, use first numeric column
+        if "value" not in df.columns:
+            exclude = {"series_id", "fetched_at", "date", "id"}
+            numeric = [
+                c for c in df.select_dtypes(include="number").columns if c not in exclude
+            ]
+            if numeric:
+                logger.info(
+                    "Column 'value' not found for %s; using '%s'", series_id, numeric[0]
+                )
+                df = df.rename(columns={numeric[0]: "value"})
+
         df["series_id"] = series_id
         now = datetime.now().isoformat()
 
