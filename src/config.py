@@ -4,7 +4,9 @@ from pathlib import Path
 
 # Project paths
 PROJECT_ROOT = Path(__file__).parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
+
+# Data storage - centralized in ~/.openbb_platform/data
+DATA_DIR = Path.home() / ".openbb_platform" / "data"
 CACHE_DIR = DATA_DIR / "cache"
 DB_PATH = DATA_DIR / "openbb_data.db"
 

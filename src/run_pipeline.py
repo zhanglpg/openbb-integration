@@ -105,7 +105,7 @@ def run_full_pipeline():
     print(f"Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
     print("Next steps:")
-    print("  - Query the SQLite database at: data/openbb_data.db")
+    print("  - Query the SQLite database at: ~/.openbb_platform/data/openbb_data.db")
     print("  - Use watchlist_fetcher.py for daily updates")
     print("  - Use sec_parser.py for filing analysis")
     print("  - Get FRED API key for economic indicators: https://fred.stlouisfed.org/")
