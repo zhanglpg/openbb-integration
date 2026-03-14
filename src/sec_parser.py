@@ -1,5 +1,6 @@
 """SEC filings parser - extracts and analyzes 10-K, 10-Q, 8-K filings."""
 
+import logging
 import sys
 from pathlib import Path
 
@@ -12,6 +13,9 @@ import pandas as pd
 from openbb import obb
 
 from database import Database
+from retry import retry_fetch
+
+logger = logging.getLogger(__name__)
 
 
 class SECParser:
@@ -24,19 +28,12 @@ class SECParser:
     def fetch_filings(
         self, symbol: str, filing_types: Optional[List[str]] = None, limit: int = 100
     ) -> pd.DataFrame:
-        """
-        Fetch SEC filings for a symbol.
-
-        Args:
-            symbol: Stock ticker symbol
-            filing_types: List of filing types to filter (e.g., ['10-K', '10-Q'])
-            limit: Maximum number of filings to retrieve
-
-        Returns:
-            DataFrame with filing information
-        """
+        """Fetch SEC filings for a symbol."""
         try:
-            data = obb.equity.fundamental.filings(symbol=symbol, provider="sec")
+            def _call():
+                return obb.equity.fundamental.filings(symbol=symbol, provider="sec")
+
+            data = retry_fetch(_call, description=f"SEC filings for {symbol}")
 
             if data is None:
                 return pd.DataFrame()
@@ -50,7 +47,7 @@ class SECParser:
             return df.head(limit)
 
         except Exception as e:
-            print(f"Error fetching SEC filings for {symbol}: {e}")
+            logger.error("Error fetching SEC filings for %s: %s", symbol, e)
             return pd.DataFrame()
 
     def get_latest_10k(self, symbol: str) -> Optional[Dict]:
@@ -206,25 +203,25 @@ class SECParser:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
     parser = SECParser()
 
-    print("=" * 60)
-    print("SEC Filings Parser")
-    print("=" * 60)
-    print()
+    logger.info("=" * 60)
+    logger.info("SEC Filings Parser")
+    logger.info("=" * 60)
 
     # Test with AAPL
     symbol = "AAPL"
-    print(f"\nAnalyzing {symbol}...")
-    print("-" * 40)
+    logger.info("Analyzing %s...", symbol)
 
     report = parser.generate_filing_report(symbol)
     print(report)
 
     # Compare multiple symbols
-    print("\n" + "=" * 60)
-    print("Comparing Filing Patterns")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Comparing Filing Patterns")
+    logger.info("=" * 60)
     symbols = ["AAPL", "MSFT", "GOOGL"]
     comparison = parser.compare_filings(symbols)
     print(comparison.to_string(index=False))

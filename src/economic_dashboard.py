@@ -1,8 +1,8 @@
 """Economic indicators dashboard - fetches and displays macroeconomic data."""
 
 import logging
-import sqlite3
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -13,8 +13,9 @@ from typing import Optional
 import pandas as pd
 from openbb import obb
 
-from config import ECONOMIC_INDICATORS
+from config import ECONOMIC_INDICATORS, PIPELINE_DEFAULTS
 from database import Database
+from retry import retry_fetch
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +30,7 @@ class EconomicDashboard:
     def fetch_fred_series(
         self, series_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None
     ) -> Optional[pd.DataFrame]:
-        """
-        Fetch FRED economic series data.
+        """Fetch FRED economic series data.
 
         Note: Requires FRED API key to be configured.
         """
@@ -41,9 +41,12 @@ class EconomicDashboard:
             if not end_date:
                 end_date = datetime.now().strftime("%Y-%m-%d")
 
-            data = obb.economy.fred_series(
-                symbol=series_id, start_date=start_date, end_date=end_date
-            )
+            def _call():
+                return obb.economy.fred_series(
+                    symbol=series_id, start_date=start_date, end_date=end_date
+                )
+
+            data = retry_fetch(_call, description=f"FRED {series_id}")
 
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
@@ -52,13 +55,16 @@ class EconomicDashboard:
                 return df
 
         except Exception as e:
-            print(f"Error fetching FRED series {series_id}: {e}")
+            logger.error("Error fetching FRED series %s: %s", series_id, e)
         return None
 
     def fetch_gdp_real(self) -> Optional[pd.DataFrame]:
         """Fetch real GDP data (no API key required)."""
         try:
-            data = obb.economy.gdp.real()
+            def _call():
+                return obb.economy.gdp.real()
+
+            data = retry_fetch(_call, description="GDP real")
 
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
@@ -66,13 +72,16 @@ class EconomicDashboard:
                 return df
 
         except Exception as e:
-            print(f"Error fetching GDP real: {e}")
+            logger.error("Error fetching GDP real: %s", e)
         return None
 
     def fetch_gdp_nominal(self) -> Optional[pd.DataFrame]:
         """Fetch nominal GDP data (no API key required)."""
         try:
-            data = obb.economy.gdp.nominal()
+            def _call():
+                return obb.economy.gdp.nominal()
+
+            data = retry_fetch(_call, description="GDP nominal")
 
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
@@ -80,13 +89,16 @@ class EconomicDashboard:
                 return df
 
         except Exception as e:
-            print(f"Error fetching GDP nominal: {e}")
+            logger.error("Error fetching GDP nominal: %s", e)
         return None
 
     def fetch_cpi(self) -> Optional[pd.DataFrame]:
         """Fetch Consumer Price Index data."""
         try:
-            data = obb.economy.cpi()
+            def _call():
+                return obb.economy.cpi()
+
+            data = retry_fetch(_call, description="CPI")
 
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
@@ -94,13 +106,16 @@ class EconomicDashboard:
                 return df
 
         except Exception as e:
-            print(f"Error fetching CPI: {e}")
+            logger.error("Error fetching CPI: %s", e)
         return None
 
     def fetch_unemployment(self) -> Optional[pd.DataFrame]:
         """Fetch unemployment rate data."""
         try:
-            data = obb.economy.unemployment()
+            def _call():
+                return obb.economy.unemployment()
+
+            data = retry_fetch(_call, description="unemployment")
 
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
@@ -108,13 +123,16 @@ class EconomicDashboard:
                 return df
 
         except Exception as e:
-            print(f"Error fetching unemployment: {e}")
+            logger.error("Error fetching unemployment: %s", e)
         return None
 
     def fetch_interest_rates(self) -> Optional[pd.DataFrame]:
         """Fetch interest rates data."""
         try:
-            data = obb.economy.interest_rates()
+            def _call():
+                return obb.economy.interest_rates()
+
+            data = retry_fetch(_call, description="interest rates")
 
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
@@ -122,86 +140,48 @@ class EconomicDashboard:
                 return df
 
         except Exception as e:
-            print(f"Error fetching interest rates: {e}")
+            logger.error("Error fetching interest rates: %s", e)
         return None
 
     def update_all_indicators(self):
         """Update all available economic indicators."""
-        print("Updating economic indicators...")
+        delay = PIPELINE_DEFAULTS["api_call_delay"]
 
-        # GDP Real (no API key)
-        print("  Fetching GDP Real...", end=" ")
-        gdp_real = self.fetch_gdp_real()
-        if gdp_real is not None and not gdp_real.empty:
-            self.db.save_economic_indicators(gdp_real, "GDP_REAL")
-            print(f"✓ ({len(gdp_real)} rows)")
-        else:
-            print("✗")
+        logger.info("Updating economic indicators...")
 
-        # GDP Nominal (no API key)
-        print("  Fetching GDP Nominal...", end=" ")
-        gdp_nominal = self.fetch_gdp_nominal()
-        if gdp_nominal is not None and not gdp_nominal.empty:
-            self.db.save_economic_indicators(gdp_nominal, "GDP_NOMINAL")
-            print(f"✓ ({len(gdp_nominal)} rows)")
-        else:
-            print("✗")
+        indicators = [
+            ("GDP_REAL", "GDP Real", self.fetch_gdp_real),
+            ("GDP_NOMINAL", "GDP Nominal", self.fetch_gdp_nominal),
+            ("CPI", "CPI", self.fetch_cpi),
+            ("UNEMPLOYMENT", "Unemployment", self.fetch_unemployment),
+            ("INTEREST_RATES", "Interest Rates", self.fetch_interest_rates),
+        ]
 
-        # CPI
-        print("  Fetching CPI...", end=" ")
-        cpi = self.fetch_cpi()
-        if cpi is not None and not cpi.empty:
-            self.db.save_economic_indicators(cpi, "CPI")
-            print(f"✓ ({len(cpi)} rows)")
-        else:
-            print("✗")
-
-        # Unemployment
-        print("  Fetching Unemployment...", end=" ")
-        unemp = self.fetch_unemployment()
-        if unemp is not None and not unemp.empty:
-            self.db.save_economic_indicators(unemp, "UNEMPLOYMENT")
-            print(f"✓ ({len(unemp)} rows)")
-        else:
-            print("✗")
-
-        # Interest Rates
-        print("  Fetching Interest Rates...", end=" ")
-        rates = self.fetch_interest_rates()
-        if rates is not None and not rates.empty:
-            self.db.save_economic_indicators(rates, "INTEREST_RATES")
-            print(f"✓ ({len(rates)} rows)")
-        else:
-            print("✗")
+        for series_id, label, fetch_fn in indicators:
+            logger.info("  Fetching %s...", label)
+            data = fetch_fn()
+            if data is not None and not data.empty:
+                self.db.save_economic_indicators(data, series_id)
+                logger.info("  %s: %d rows saved", label, len(data))
+            else:
+                logger.warning("  %s: no data returned", label)
+            time.sleep(delay)
 
         # FRED indicators (requires API key)
-        print("\n  FRED indicators (requires API key):")
+        logger.info("  FRED indicators (requires API key):")
         for series_id, description in ECONOMIC_INDICATORS.items():
-            print(f"    {series_id} ({description})...", end=" ")
+            logger.info("    %s (%s)...", series_id, description)
             data = self.fetch_fred_series(series_id)
             if data is not None and not data.empty:
                 self.db.save_economic_indicators(data, series_id)
-                print(f"✓ ({len(data)} rows)")
+                logger.info("    %s: %d rows saved", series_id, len(data))
             else:
-                print("✗ (needs API key)")
+                logger.warning("    %s: no data (needs API key)", series_id)
+            time.sleep(delay)
 
     def get_economic_summary(self) -> pd.DataFrame:
         """Get summary of latest economic indicators."""
-        query = """
-            SELECT e1.series_id, e1.date, e1.value
-            FROM economic_indicators e1
-            WHERE e1.date = (
-                SELECT MAX(e2.date) FROM economic_indicators e2
-                WHERE e2.series_id = e1.series_id
-            )
-            ORDER BY e1.series_id
-        """
-        try:
-            with sqlite3.connect(str(self.db.db_path)) as conn:
-                return pd.read_sql_query(query, conn)
-        except Exception as e:
-            logger.error("Error fetching economic summary: %s", e)
-            return pd.DataFrame()
+        return self.db.get_latest_economic_indicators()
 
     def generate_dashboard_report(self) -> str:
         """Generate a text report of economic indicators."""
@@ -239,20 +219,20 @@ class EconomicDashboard:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
     dashboard = EconomicDashboard()
 
-    print("=" * 60)
-    print("Economic Indicators Dashboard")
-    print("=" * 60)
-    print()
+    logger.info("=" * 60)
+    logger.info("Economic Indicators Dashboard")
+    logger.info("=" * 60)
 
     # Update all indicators
     dashboard.update_all_indicators()
-    print()
 
     # Generate report
-    print("=" * 60)
-    print("Dashboard Report")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Dashboard Report")
+    logger.info("=" * 60)
     report = dashboard.generate_dashboard_report()
     print(report)
