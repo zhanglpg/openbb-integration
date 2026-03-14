@@ -133,6 +133,9 @@ def main():
                 value = row["value"].iloc[-1]
                 date = row["date"].iloc[-1]
                 name = friendly_names.get(series_id, series_id)
+                if value is None:
+                    cols[i].metric(name, "N/A", delta=f"As of {date}")
+                    continue
                 formatted = f"{value:.2f}"
                 if series_id in ("DGS10", "FEDFUNDS"):
                     formatted += "%"
