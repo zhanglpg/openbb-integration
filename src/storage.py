@@ -36,53 +36,52 @@ class DataStorage:
     
     def _init_db(self):
         """Initialize SQLite database with schema"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Watchlist table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS watchlist (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT UNIQUE NOT NULL,
-                name TEXT,
-                sector TEXT,
-                industry TEXT,
-                added_date TEXT DEFAULT CURRENT_TIMESTAMP,
-                is_active INTEGER DEFAULT 1
-            )
-        """)
-        
-        # Data fetch log
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS fetch_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT NOT NULL,
-                data_type TEXT NOT NULL,
-                provider TEXT,
-                fetch_date TEXT DEFAULT CURRENT_TIMESTAMP,
-                status TEXT,
-                error_message TEXT,
-                record_count INTEGER
-            )
-        """)
-        
-        # SEC filings metadata
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS sec_filings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT NOT NULL,
-                filing_date TEXT,
-                report_type TEXT,
-                accession_number TEXT UNIQUE,
-                report_url TEXT,
-                filing_url TEXT,
-                stored_path TEXT,
-                fetched_date TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            # Watchlist table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS watchlist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT UNIQUE NOT NULL,
+                    name TEXT,
+                    sector TEXT,
+                    industry TEXT,
+                    added_date TEXT DEFAULT CURRENT_TIMESTAMP,
+                    is_active INTEGER DEFAULT 1
+                )
+            """)
+
+            # Data fetch log
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS fetch_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    data_type TEXT NOT NULL,
+                    provider TEXT,
+                    fetch_date TEXT DEFAULT CURRENT_TIMESTAMP,
+                    status TEXT,
+                    error_message TEXT,
+                    record_count INTEGER
+                )
+            """)
+
+            # SEC filings metadata
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sec_filings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    filing_date TEXT,
+                    report_type TEXT,
+                    accession_number TEXT UNIQUE,
+                    report_url TEXT,
+                    filing_url TEXT,
+                    stored_path TEXT,
+                    fetched_date TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            conn.commit()
     
     def save_prices(self, symbol: str, df: pd.DataFrame) -> str:
         """
@@ -214,29 +213,28 @@ class DataStorage:
         df_to_save.to_parquet(filepath, index=False)
         
         # Also save to database
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        for _, row in df.iterrows():
-            try:
-                cursor.execute("""
-                    INSERT OR REPLACE INTO sec_filings 
-                    (symbol, filing_date, report_type, accession_number, report_url, filing_url, stored_path)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    symbol,
-                    row.get('filing_date'),
-                    row.get('report_type'),
-                    row.get('accession_number'),
-                    row.get('report_url'),
-                    row.get('filing_detail_url'),
-                    str(filepath)
-                ))
-            except Exception as e:
-                print(f"Error saving filing {row.get('accession_number')}: {e}")
-        
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            for _, row in df.iterrows():
+                try:
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO sec_filings
+                        (symbol, filing_date, report_type, accession_number, report_url, filing_url, stored_path)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        symbol,
+                        row.get('filing_date'),
+                        row.get('report_type'),
+                        row.get('accession_number'),
+                        row.get('report_url'),
+                        row.get('filing_detail_url'),
+                        str(filepath)
+                    ))
+                except Exception as e:
+                    print(f"Error saving filing {row.get('accession_number')}: {e}")
+
+            conn.commit()
         
         return [str(filepath)]
     
@@ -250,17 +248,13 @@ class DataStorage:
         record_count: int = 0
     ):
         """Log a data fetch attempt"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT INTO fetch_log 
-            (symbol, data_type, provider, status, error_message, record_count)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (symbol, data_type, provider, status, error_message, record_count))
-        
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT INTO fetch_log
+                (symbol, data_type, provider, status, error_message, record_count)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (symbol, data_type, provider, status, error_message, record_count))
+            conn.commit()
     
     def get_fetch_history(
         self, 
@@ -268,37 +262,27 @@ class DataStorage:
         limit: int = 100
     ) -> pd.DataFrame:
         """Get fetch history from database"""
-        conn = sqlite3.connect(self.db_path)
-        
-        if symbol:
-            query = "SELECT * FROM fetch_log WHERE symbol = ? ORDER BY fetch_date DESC LIMIT ?"
-            df = pd.read_sql_query(query, conn, params=(symbol, limit))
-        else:
-            query = "SELECT * FROM fetch_log ORDER BY fetch_date DESC LIMIT ?"
-            df = pd.read_sql_query(query, conn, params=(limit,))
-        
-        conn.close()
-        return df
+        with sqlite3.connect(self.db_path) as conn:
+            if symbol:
+                query = "SELECT * FROM fetch_log WHERE symbol = ? ORDER BY fetch_date DESC LIMIT ?"
+                return pd.read_sql_query(query, conn, params=(symbol, limit))
+            else:
+                query = "SELECT * FROM fetch_log ORDER BY fetch_date DESC LIMIT ?"
+                return pd.read_sql_query(query, conn, params=(limit,))
     
     def update_watchlist(self, symbol: str, name: str = None, sector: str = None, industry: str = None):
         """Add or update symbol in watchlist table"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT OR REPLACE INTO watchlist (symbol, name, sector, industry)
-            VALUES (?, ?, ?, ?)
-        """, (symbol, name, sector, industry))
-        
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO watchlist (symbol, name, sector, industry)
+                VALUES (?, ?, ?, ?)
+            """, (symbol, name, sector, industry))
+            conn.commit()
     
     def get_watchlist(self) -> pd.DataFrame:
         """Get watchlist from database"""
-        conn = sqlite3.connect(self.db_path)
-        df = pd.read_sql_query("SELECT * FROM watchlist WHERE is_active = 1", conn)
-        conn.close()
-        return df
+        with sqlite3.connect(self.db_path) as conn:
+            return pd.read_sql_query("SELECT * FROM watchlist WHERE is_active = 1", conn)
 
 
 if __name__ == "__main__":

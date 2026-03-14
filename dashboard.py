@@ -185,7 +185,7 @@ def main():
         
         # Display portfolio table
         st.dataframe(
-            display_df.style.applymap(color_change, subset=["Change"]),
+            display_df.style.map(color_change, subset=["Change"]),
             use_container_width=True,
             hide_index=True
         )

@@ -1,6 +1,8 @@
 """Economic indicators dashboard - fetches and displays macroeconomic data."""
 
 import sys
+import sqlite3
+import logging
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -11,6 +13,8 @@ from openbb import obb
 
 from config import ECONOMIC_INDICATORS
 from database import Database
+
+logger = logging.getLogger(__name__)
 
 
 class EconomicDashboard:
@@ -182,14 +186,21 @@ class EconomicDashboard:
     
     def get_economic_summary(self) -> pd.DataFrame:
         """Get summary of latest economic indicators."""
-        summary = []
-        
-        # Query latest values from database
-        with self.db.db_path.connect() as conn:
-            # This would need to be implemented based on actual data
-            pass
-        
-        return pd.DataFrame(summary)
+        query = """
+            SELECT e1.series_id, e1.date, e1.value
+            FROM economic_indicators e1
+            WHERE e1.date = (
+                SELECT MAX(e2.date) FROM economic_indicators e2
+                WHERE e2.series_id = e1.series_id
+            )
+            ORDER BY e1.series_id
+        """
+        try:
+            with sqlite3.connect(str(self.db.db_path)) as conn:
+                return pd.read_sql_query(query, conn)
+        except Exception as e:
+            logger.error("Error fetching economic summary: %s", e)
+            return pd.DataFrame()
     
     def generate_dashboard_report(self) -> str:
         """Generate a text report of economic indicators."""

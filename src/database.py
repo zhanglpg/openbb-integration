@@ -1,13 +1,26 @@
 """Local data storage using SQLite."""
 
+import re
 import sqlite3
-import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 import pandas as pd
 
 from config import DB_PATH
+
+logger = logging.getLogger(__name__)
+
+# Column name validation: only allow alphanumeric and underscores
+_VALID_COLUMN_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+
+def _sanitize_column_name(col: str) -> str:
+    """Validate and quote a column name to prevent SQL injection."""
+    if not _VALID_COLUMN_RE.match(col):
+        raise ValueError(f"Invalid column name: {col!r}")
+    return f'"{col}"'
 
 
 class Database:
@@ -169,9 +182,13 @@ class Database:
             for col in df.columns:
                 if col not in existing_columns and col not in ['id']:
                     try:
-                        conn.execute(f"ALTER TABLE fundamentals ADD COLUMN {col} REAL")
-                    except sqlite3.OperationalError:
-                        pass  # Column might already exist
+                        safe_col = _sanitize_column_name(col)
+                        conn.execute(f"ALTER TABLE fundamentals ADD COLUMN {safe_col} REAL")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column" in str(e).lower():
+                            logger.debug("Column %s already exists in fundamentals", col)
+                        else:
+                            raise
             
             conn.commit()
         
@@ -203,9 +220,13 @@ class Database:
                 if col not in existing_columns and col not in ['id']:
                     col_type = 'TEXT' if df[col].dtype == 'object' else 'REAL'
                     try:
-                        conn.execute(f"ALTER TABLE sec_filings ADD COLUMN {col} {col_type}")
-                    except sqlite3.OperationalError:
-                        pass  # Column might already exist
+                        safe_col = _sanitize_column_name(col)
+                        conn.execute(f"ALTER TABLE sec_filings ADD COLUMN {safe_col} {col_type}")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column" in str(e).lower():
+                            logger.debug("Column %s already exists in sec_filings", col)
+                        else:
+                            raise
             
             conn.commit()
         
@@ -242,11 +263,14 @@ class Database:
                 if col not in existing_columns and col not in ['id']:
                     col_type = 'TEXT' if df[col].dtype == 'object' else 'REAL'
                     try:
-                        # Quote column name to handle reserved keywords like "order"
-                        conn.execute(f'ALTER TABLE economic_indicators ADD COLUMN "{col}" {col_type}')
+                        safe_col = _sanitize_column_name(col)
+                        conn.execute(f'ALTER TABLE economic_indicators ADD COLUMN {safe_col} {col_type}')
                         conn.commit()
-                    except sqlite3.OperationalError:
-                        pass  # Column might already exist
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column" in str(e).lower():
+                            logger.debug("Column %s already exists in economic_indicators", col)
+                        else:
+                            raise
         
         with sqlite3.connect(self.db_path) as conn:
             # Delete existing data for this series to avoid duplicates
