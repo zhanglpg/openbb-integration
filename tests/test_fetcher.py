@@ -1,8 +1,9 @@
 """Tests for src/fetcher.py."""
 
-import pytest
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
-from unittest.mock import patch, MagicMock
+import pytest
 
 
 class TestDataFetcher:
@@ -11,6 +12,7 @@ class TestDataFetcher:
         """Set up DataFetcher with mocked obb."""
         with patch("fetcher.obb") as self.mock_obb:
             from fetcher import DataFetcher
+
             self.fetcher = DataFetcher()
             yield
 
@@ -63,7 +65,9 @@ class TestDataFetcher:
         assert not result.empty
 
     def test_fetch_metrics_success(self, sample_fundamentals_df):
-        self.mock_obb.equity.fundamental.metrics.return_value = self._make_result(sample_fundamentals_df)
+        self.mock_obb.equity.fundamental.metrics.return_value = self._make_result(
+            sample_fundamentals_df
+        )
         result = self.fetcher.fetch_metrics("AAPL")
         assert not result.empty
 

@@ -1,18 +1,15 @@
 """Tests for src/config.py."""
 
-import pytest
-from pathlib import Path
-
 from config import (
-    PROJECT_ROOT,
-    DATA_DIR,
-    CACHE_DIR,
-    DB_PATH,
-    WATCHLIST,
-    ECONOMIC_INDICATORS,
-    SEC_FILING_TYPES,
-    REFRESH_INTERVALS,
     ALERT_THRESHOLDS,
+    CACHE_DIR,
+    DATA_DIR,
+    DB_PATH,
+    ECONOMIC_INDICATORS,
+    PROJECT_ROOT,
+    REFRESH_INTERVALS,
+    SEC_FILING_TYPES,
+    WATCHLIST,
 )
 
 

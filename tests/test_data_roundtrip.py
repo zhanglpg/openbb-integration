@@ -1,12 +1,9 @@
 """Integration tests for data round-trip: fetch -> store -> retrieve."""
 
 import sqlite3
-import pytest
-import pandas as pd
-from pathlib import Path
 
-from database import Database
-from storage import DataStorage
+import pandas as pd
+import pytest
 
 
 @pytest.mark.integration
@@ -40,9 +37,7 @@ class TestDatabaseRoundTrip:
         tmp_db.save_fundamentals(sample_fundamentals_df, "AAPL")
 
         with sqlite3.connect(tmp_db.db_path) as conn:
-            result = pd.read_sql_query(
-                "SELECT * FROM fundamentals WHERE symbol = 'AAPL'", conn
-            )
+            result = pd.read_sql_query("SELECT * FROM fundamentals WHERE symbol = 'AAPL'", conn)
 
         assert not result.empty
         assert result["pe_ratio"].iloc[0] == pytest.approx(28.5)
@@ -53,9 +48,7 @@ class TestDatabaseRoundTrip:
         tmp_db.save_sec_filings(sample_filings_df, "AAPL")
 
         with sqlite3.connect(tmp_db.db_path) as conn:
-            result = pd.read_sql_query(
-                "SELECT * FROM sec_filings WHERE symbol = 'AAPL'", conn
-            )
+            result = pd.read_sql_query("SELECT * FROM sec_filings WHERE symbol = 'AAPL'", conn)
 
         assert len(result) == 3
         report_types = set(result["report_type"])
@@ -117,9 +110,7 @@ class TestStorageRoundTrip:
 
         # Check SQLite
         with sqlite3.connect(tmp_storage.db_path) as conn:
-            db_result = pd.read_sql_query(
-                "SELECT * FROM sec_filings WHERE symbol = 'AAPL'", conn
-            )
+            db_result = pd.read_sql_query("SELECT * FROM sec_filings WHERE symbol = 'AAPL'", conn)
         assert len(db_result) == 3
 
     def test_fetch_log_roundtrip(self, tmp_storage):
@@ -145,7 +136,9 @@ class TestStorageRoundTrip:
         assert len(watchlist) == 2
 
         # Update
-        tmp_storage.update_watchlist("AAPL", name="Apple Inc.", sector="Technology", industry="Consumer Electronics")
+        tmp_storage.update_watchlist(
+            "AAPL", name="Apple Inc.", sector="Technology", industry="Consumer Electronics"
+        )
         watchlist = tmp_storage.get_watchlist()
         assert len(watchlist) == 2
         aapl_row = watchlist[watchlist["symbol"] == "AAPL"].iloc[0]

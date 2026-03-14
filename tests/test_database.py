@@ -1,11 +1,11 @@
 """Tests for src/database.py."""
 
 import sqlite3
-import pytest
-import pandas as pd
-from datetime import datetime
 
-from database import Database, _sanitize_column_name
+import pandas as pd
+import pytest
+
+from database import _sanitize_column_name
 
 
 class TestSanitizeColumnName:
@@ -34,9 +34,7 @@ class TestSanitizeColumnName:
 class TestDatabaseInit:
     def test_creates_tables(self, tmp_db):
         with sqlite3.connect(tmp_db.db_path) as conn:
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             tables = {row[0] for row in cursor.fetchall()}
 
         assert "price_history" in tables
@@ -69,9 +67,14 @@ class TestSavePrices:
     def test_save_with_date_index(self, tmp_db):
         dates = pd.date_range("2025-01-01", periods=3, freq="B")
         df = pd.DataFrame(
-            {"open": [1, 2, 3], "close": [4, 5, 6], "high": [7, 8, 9],
-             "low": [0.5, 1.5, 2.5], "volume": [100, 200, 300]},
-            index=dates
+            {
+                "open": [1, 2, 3],
+                "close": [4, 5, 6],
+                "high": [7, 8, 9],
+                "low": [0.5, 1.5, 2.5],
+                "volume": [100, 200, 300],
+            },
+            index=dates,
         )
         df.index.name = "date"
         tmp_db.save_prices(df, "TEST")
@@ -88,17 +91,17 @@ class TestSaveFundamentals:
     def test_save_fundamentals(self, tmp_db, sample_fundamentals_df):
         tmp_db.save_fundamentals(sample_fundamentals_df, "AAPL")
         with sqlite3.connect(tmp_db.db_path) as conn:
-            result = pd.read_sql_query(
-                "SELECT * FROM fundamentals WHERE symbol = 'AAPL'", conn
-            )
+            result = pd.read_sql_query("SELECT * FROM fundamentals WHERE symbol = 'AAPL'", conn)
         assert not result.empty
         assert result["market_cap"].iloc[0] == 2500000000000
 
     def test_dynamic_column_addition(self, tmp_db):
-        df = pd.DataFrame({
-            "market_cap": [100],
-            "new_metric": [42.0],
-        })
+        df = pd.DataFrame(
+            {
+                "market_cap": [100],
+                "new_metric": [42.0],
+            }
+        )
         tmp_db.save_fundamentals(df, "TEST")
         with sqlite3.connect(tmp_db.db_path) as conn:
             cursor = conn.execute("PRAGMA table_info(fundamentals)")
@@ -115,9 +118,7 @@ class TestSaveSecFilings:
     def test_save_sec_filings(self, tmp_db, sample_filings_df):
         tmp_db.save_sec_filings(sample_filings_df, "AAPL")
         with sqlite3.connect(tmp_db.db_path) as conn:
-            result = pd.read_sql_query(
-                "SELECT * FROM sec_filings WHERE symbol = 'AAPL'", conn
-            )
+            result = pd.read_sql_query("SELECT * FROM sec_filings WHERE symbol = 'AAPL'", conn)
         assert len(result) == 3
 
     def test_date_formatting(self, tmp_db, sample_filings_df):

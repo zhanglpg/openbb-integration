@@ -1,22 +1,25 @@
 """Tests for src/economic_dashboard.py."""
 
-import sqlite3
-import pytest
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
-from unittest.mock import patch, MagicMock
+import pytest
 
 
 class TestEconomicDashboard:
     @pytest.fixture(autouse=True)
     def setup(self, tmp_db_path):
         """Set up EconomicDashboard with mocked obb and temp DB."""
-        with patch("economic_dashboard.obb") as self.mock_obb, \
-             patch("database.DB_PATH", tmp_db_path), \
-             patch("config.DB_PATH", tmp_db_path), \
-             patch("config.DATA_DIR", tmp_db_path.parent), \
-             patch("config.CACHE_DIR", tmp_db_path.parent / "cache"):
+        with (
+            patch("economic_dashboard.obb") as self.mock_obb,
+            patch("database.DB_PATH", tmp_db_path),
+            patch("config.DB_PATH", tmp_db_path),
+            patch("config.DATA_DIR", tmp_db_path.parent),
+            patch("config.CACHE_DIR", tmp_db_path.parent / "cache"),
+        ):
             (tmp_db_path.parent / "cache").mkdir(exist_ok=True)
             from economic_dashboard import EconomicDashboard
+
             self.dashboard = EconomicDashboard()
             yield
 

@@ -1,11 +1,9 @@
 """Tests for src/storage.py."""
 
 import sqlite3
-import pytest
-import pandas as pd
 from pathlib import Path
 
-from storage import DataStorage
+import pandas as pd
 
 
 class TestDataStorageInit:
@@ -19,9 +17,7 @@ class TestDataStorageInit:
 
     def test_creates_tables(self, tmp_storage):
         with sqlite3.connect(tmp_storage.db_path) as conn:
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             tables = {row[0] for row in cursor.fetchall()}
         assert "watchlist" in tables
         assert "fetch_log" in tables
@@ -89,9 +85,7 @@ class TestSaveSecFilings:
 
         # Verify DB records
         with sqlite3.connect(tmp_storage.db_path) as conn:
-            result = pd.read_sql_query(
-                "SELECT * FROM sec_filings WHERE symbol = 'AAPL'", conn
-            )
+            result = pd.read_sql_query("SELECT * FROM sec_filings WHERE symbol = 'AAPL'", conn)
         assert len(result) == 3
 
     def test_save_empty_df(self, tmp_storage):

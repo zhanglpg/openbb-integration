@@ -2,15 +2,16 @@
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 import argparse
 from datetime import datetime
 
-from watchlist_fetcher import WatchlistFetcher
-from sec_parser import SECParser
-from economic_dashboard import EconomicDashboard
 from database import Database
+from economic_dashboard import EconomicDashboard
+from sec_parser import SECParser
+from watchlist_fetcher import WatchlistFetcher
 
 
 def run_full_pipeline():
@@ -20,13 +21,13 @@ def run_full_pipeline():
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 70)
     print()
-    
+
     # Initialize database
     print("Initializing database...")
     db = Database()
     print(f"Database location: {db.db_path}")
     print()
-    
+
     # 1. Watchlist Data Fetcher
     print("=" * 70)
     print("Phase 1: Watchlist Data Fetcher")
@@ -34,19 +35,19 @@ def run_full_pipeline():
     fetcher = WatchlistFetcher()
     print(f"Symbols to track: {', '.join(fetcher.symbols)}")
     print()
-    
+
     print("Fetching prices...")
     fetcher.update_all_prices(days=30)
     print()
-    
+
     print("Fetching fundamentals...")
     fetcher.update_all_fundamentals()
     print()
-    
+
     print("Fetching SEC filings...")
     fetcher.update_all_sec_filings(limit=10)
     print()
-    
+
     # Show watchlist summary
     print("Watchlist Summary:")
     print("-" * 70)
@@ -59,13 +60,13 @@ def run_full_pipeline():
     except Exception as e:
         print(f"Error generating summary: {e}")
     print()
-    
+
     # 2. SEC Filings Parser
     print("=" * 70)
     print("Phase 2: SEC Filings Parser")
     print("=" * 70)
     parser = SECParser()
-    
+
     # Generate reports for key symbols
     key_symbols = ["AAPL", "MSFT", "GOOGL", "NVDA", "BABA"]
     for symbol in key_symbols:
@@ -74,13 +75,13 @@ def run_full_pipeline():
         try:
             report = parser.generate_filing_report(symbol)
             # Print just the first few lines
-            for line in report.split('\n')[:15]:
+            for line in report.split("\n")[:15]:
                 print(line)
             print("...")
         except Exception as e:
             print(f"Error: {e}")
     print()
-    
+
     # 3. Economic Indicators Dashboard
     print("=" * 70)
     print("Phase 3: Economic Indicators Dashboard")
@@ -88,7 +89,7 @@ def run_full_pipeline():
     dashboard = EconomicDashboard()
     dashboard.update_all_indicators()
     print()
-    
+
     # Generate dashboard report
     try:
         report = dashboard.generate_dashboard_report()
@@ -96,7 +97,7 @@ def run_full_pipeline():
     except Exception as e:
         print(f"Error generating dashboard report: {e}")
     print()
-    
+
     # Summary
     print("=" * 70)
     print("Pipeline Complete")
@@ -116,18 +117,18 @@ def run_quick_test():
     print("OpenBB Pipeline Quick Test")
     print("=" * 70)
     print()
-    
+
     # Test database
     print("Testing database...")
     db = Database()
     print(f"✓ Database initialized: {db.db_path}")
     print()
-    
+
     # Test watchlist fetcher
     print("Testing watchlist fetcher...")
     fetcher = WatchlistFetcher()
     print(f"✓ Symbols: {', '.join(fetcher.symbols[:5])}...")
-    
+
     # Test single price fetch
     print("  Fetching AAPL prices...", end=" ")
     df = fetcher.fetch_prices("AAPL", days=5)
@@ -135,16 +136,16 @@ def run_quick_test():
         print(f"✓ ({len(df)} rows)")
     else:
         print("✗")
-    
+
     # Test fundamentals
     print("  Fetching AAPL fundamentals...", end=" ")
     df = fetcher.fetch_fundamentals("AAPL")
     if df is not None and not df.empty:
-        print(f"✓")
+        print("✓")
     else:
         print("✗")
     print()
-    
+
     # Test SEC parser
     print("Testing SEC parser...")
     parser = SECParser()
@@ -155,7 +156,7 @@ def run_quick_test():
     else:
         print("✗")
     print()
-    
+
     # Test economic dashboard
     print("Testing economic dashboard...")
     dashboard = EconomicDashboard()
@@ -165,7 +166,7 @@ def run_quick_test():
         print(f"✓ ({len(gdp)} rows)")
     else:
         print("✗")
-    
+
     print()
     print("=" * 70)
     print("Quick test complete!")
@@ -179,11 +180,11 @@ def main():
         choices=["full", "test", "prices", "fundamentals", "sec", "economic"],
         default="test",
         nargs="?",
-        help="Pipeline mode to run"
+        help="Pipeline mode to run",
     )
-    
+
     args = parser.parse_args()
-    
+
     if args.mode == "full":
         run_full_pipeline()
     elif args.mode == "test":

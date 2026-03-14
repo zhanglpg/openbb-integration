@@ -1,8 +1,5 @@
 """Tests for src/watchlist.py."""
 
-import pytest
-from pathlib import Path
-
 from watchlist import WatchlistManager
 
 
