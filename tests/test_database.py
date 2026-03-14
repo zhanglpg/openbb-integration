@@ -103,6 +103,33 @@ class TestSavePrices:
         result = tmp_db.get_latest_prices("BAD")
         assert result.empty
 
+    def test_save_prices_missing_close_column(self, tmp_db):
+        """Bug #7 regression: DataFrame without 'close' column should be rejected."""
+        df = pd.DataFrame({
+            "date": ["2025-01-01", "2025-01-02"],
+            "open": [150.0, 151.0],
+            "high": [155.0, 156.0],
+            "low": [149.0, 150.0],
+            "volume": [1000000, 1100000],
+        })
+        tmp_db.save_prices(df, "NOCL")
+        result = tmp_db.get_latest_prices("NOCL")
+        assert result.empty
+
+    def test_save_prices_null_dates_dropped(self, tmp_db):
+        """Bug #7 regression: rows with null dates should be dropped, valid rows kept."""
+        df = pd.DataFrame({
+            "date": ["2025-01-01", None, "2025-01-03"],
+            "close": [150.0, 151.0, 152.0],
+            "open": [149.0, 150.0, 151.0],
+            "high": [155.0, 156.0, 157.0],
+            "low": [148.0, 149.0, 150.0],
+            "volume": [100, 200, 300],
+        })
+        tmp_db.save_prices(df, "NULLD")
+        result = tmp_db.get_latest_prices("NULLD", days=10)
+        assert len(result) == 2
+
 
 class TestSaveFundamentals:
     def test_save_fundamentals(self, tmp_db, sample_fundamentals_df):
@@ -181,6 +208,18 @@ class TestSaveSecFilings:
             "filing_date": ["2025-01-15"],
             "report_type": ["10-K"],
             "accession_number": [None],
+            "report_url": ["https://sec.gov/10k"],
+        })
+        tmp_db.save_sec_filings(df, "AAPL")
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            result = pd.read_sql_query("SELECT * FROM sec_filings WHERE symbol = 'AAPL'", conn)
+        assert result.empty
+
+    def test_missing_accession_number_column(self, tmp_db):
+        """Bug #7 regression: DataFrame without accession_number column should be skipped entirely."""
+        df = pd.DataFrame({
+            "filing_date": ["2025-01-15"],
+            "report_type": ["10-K"],
             "report_url": ["https://sec.gov/10k"],
         })
         tmp_db.save_sec_filings(df, "AAPL")
@@ -275,3 +314,24 @@ class TestBatchQueries:
         tmp_db.save_economic_indicators(sample_economic_df, "CPI")
         result = tmp_db.get_latest_economic_indicators()
         assert len(result) == 2
+
+    def test_batch_partial_data(self, tmp_db, sample_price_df):
+        """Bug #3 regression: batch query with mix of known and unknown symbols."""
+        tmp_db.save_prices(sample_price_df, "AAPL")
+        result = tmp_db.get_latest_prices_batch(["AAPL", "UNKNOWN"])
+        assert len(result) == 1
+        assert result["symbol"].iloc[0] == "AAPL"
+
+    def test_batch_with_previous_single_price(self, tmp_db):
+        """Bug #11 regression: only 1 price row should return 1 row, not crash."""
+        df = pd.DataFrame({
+            "date": ["2025-01-01"],
+            "close": [100.0],
+            "open": [99.0],
+            "high": [101.0],
+            "low": [98.0],
+            "volume": [500000],
+        })
+        tmp_db.save_prices(df, "SOLO")
+        result = tmp_db.get_latest_prices_batch_with_previous(["SOLO"])
+        assert len(result) == 1  # only 1 row exists, can't compute change
