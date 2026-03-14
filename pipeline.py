@@ -4,16 +4,16 @@ Daily Data Pipeline - Fetch and store data for watchlist symbols
 """
 import logging
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from watchlist import WatchlistManager
-from fetcher import DataFetcher
-from database import Database
 from config import PIPELINE_DEFAULTS
+from database import Database
+from fetcher import DataFetcher
+from watchlist import WatchlistManager
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,9 @@ def fetch_fundamentals(watchlist: WatchlistManager, fetcher: DataFetcher, db: Da
                 logger.error("    Error: %s", e)
 
 
-def fetch_sec_filings(watchlist: WatchlistManager, fetcher: DataFetcher, db: Database, limit: int = None):
+def fetch_sec_filings(
+    watchlist: WatchlistManager, fetcher: DataFetcher, db: Database, limit: int = None,
+):
     """Fetch SEC filings for all symbols"""
     if limit is None:
         limit = PIPELINE_DEFAULTS["sec_filing_limit"]
@@ -96,11 +98,13 @@ def fetch_sec_filings(watchlist: WatchlistManager, fetcher: DataFetcher, db: Dat
 
             if not df.empty:
                 # Filter for 10-K and 10-Q only
-                filings_of_interest = df[df['report_type'].isin(['10-K', '10-Q', '10-K/A', '10-Q/A'])]
+                filing_types = ['10-K', '10-Q', '10-K/A', '10-Q/A']
+                filings_of_interest = df[df['report_type'].isin(filing_types)]
 
                 if len(filings_of_interest) > 0:
                     db.save_sec_filings(filings_of_interest, symbol)
-                    db.log_fetch(symbol, 'sec_filings', 'sec', 'success', record_count=len(filings_of_interest))
+                    count = len(filings_of_interest)
+                    db.log_fetch(symbol, 'sec_filings', 'sec', 'success', record_count=count)
                     logger.info("  Saved %d filings (10-K/10-Q only)", len(filings_of_interest))
 
                     # Show latest filings
@@ -152,7 +156,10 @@ def main():
         logger.info("Recent fetch history:")
         for _, row in history.head(10).iterrows():
             status_icon = "OK" if row['status'] == 'success' else "FAIL"
-            logger.info("  %s %6s | %-15s | %4d records", status_icon, row['symbol'], row['data_type'], row['record_count'])
+            logger.info(
+                "  %s %6s | %-15s | %4d records",
+                status_icon, row['symbol'], row['data_type'], row['record_count'],
+            )
 
 
 if __name__ == "__main__":

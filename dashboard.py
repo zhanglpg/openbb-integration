@@ -4,17 +4,18 @@ Streamlit Portfolio Dashboard
 Real-time portfolio monitoring with OpenBB data pipeline
 """
 
-import streamlit as st
-import pandas as pd
-from pathlib import Path
-from datetime import datetime
 import sys
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from database import Database
 from config import WATCHLIST
+from database import Database
 from run_pipeline import run_full_pipeline
 
 # Page config

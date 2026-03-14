@@ -9,8 +9,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 import pandas as pd
-from watchlist import WatchlistManager
+
 from database import Database
+from watchlist import WatchlistManager
 
 logger = logging.getLogger(__name__)
 

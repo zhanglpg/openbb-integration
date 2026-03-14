@@ -161,16 +161,34 @@ class Database:
             # ----------------------------------------------------------
             # Indexes
             # ----------------------------------------------------------
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_price_history_symbol ON price_history(symbol)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_price_history_date ON price_history(date)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_fundamentals_symbol ON fundamentals(symbol)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_sec_filings_symbol ON sec_filings(symbol)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_price_history_symbol"
+                " ON price_history(symbol)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_price_history_date"
+                " ON price_history(date)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_fundamentals_symbol"
+                " ON fundamentals(symbol)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sec_filings_symbol"
+                " ON sec_filings(symbol)"
+            )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_economic_indicators_series_id"
                 " ON economic_indicators(series_id)"
             )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_fetch_log_symbol ON fetch_log(symbol)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_fetch_log_data_type ON fetch_log(data_type)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_fetch_log_symbol"
+                " ON fetch_log(symbol)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_fetch_log_data_type"
+                " ON fetch_log(data_type)"
+            )
 
             conn.commit()
 
@@ -503,7 +521,9 @@ class Database:
         self, data_type: str, symbol: Optional[str], rows_fetched: int, status: str = "success"
     ):
         """Log a fetch operation (alias kept for backward compatibility)."""
-        self.log_fetch(symbol or "", data_type, provider="", status=status, record_count=rows_fetched)
+        self.log_fetch(
+            symbol or "", data_type, provider="", status=status, record_count=rows_fetched,
+        )
 
     def log_fetch(
         self,

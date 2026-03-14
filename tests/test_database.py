@@ -4,7 +4,6 @@ import json
 import sqlite3
 
 import pandas as pd
-import pytest
 
 from database import SCHEMA_VERSION
 
@@ -28,7 +27,9 @@ class TestDatabaseInit:
 
     def test_schema_version_recorded(self, tmp_db):
         with sqlite3.connect(tmp_db.db_path) as conn:
-            cursor = conn.execute("SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1")
+            cursor = conn.execute(
+                "SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1"
+            )
             version = cursor.fetchone()[0]
         assert version == SCHEMA_VERSION
 
@@ -216,7 +217,7 @@ class TestSaveSecFilings:
         assert result.empty
 
     def test_missing_accession_number_column(self, tmp_db):
-        """Bug #7 regression: DataFrame without accession_number column should be skipped entirely."""
+        """Bug #7: DataFrame without accession_number column should be skipped."""
         df = pd.DataFrame({
             "filing_date": ["2025-01-15"],
             "report_type": ["10-K"],

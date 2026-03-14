@@ -9,7 +9,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 import argparse
 from datetime import datetime
 
-from config import PIPELINE_DEFAULTS
 from database import Database
 from economic_dashboard import EconomicDashboard
 from sec_parser import SECParser

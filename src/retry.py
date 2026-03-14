@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 # Exception types that indicate transient failures worth retrying
-_TRANSIENT_MARKERS = ("timeout", "timed out", "connection", "429", "500", "502", "503", "rate limit")
+_TRANSIENT_MARKERS = (
+    "timeout", "timed out", "connection", "429", "500", "502", "503", "rate limit",
+)
 
 
 def _is_transient(exc: Exception) -> bool:
