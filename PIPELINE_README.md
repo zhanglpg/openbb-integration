@@ -7,7 +7,7 @@ Daily data pipeline for fetching and storing financial data.
 ```bash
 # Activate virtual environment
 cd /Users/lipingzhang/.openclaw/workspace/projects/openbb
-source .venv/bin/activate
+source ~/.openbb_platform/.openbb_venv/bin/activate
 
 # Run the pipeline
 python pipeline.py
@@ -98,7 +98,7 @@ Run daily with cron:
 crontab -e
 
 # Add daily job at 9 AM
-0 9 * * * cd /Users/lipingzhang/.openclaw/workspace/projects/openbb && source .venv/bin/activate && python pipeline.py >> logs/pipeline.log 2>&1
+0 9 * * * cd /Users/lipingzhang/.openclaw/workspace/projects/openbb && source ~/.openbb_platform/.openbb_venv/bin/activate && python pipeline.py >> logs/pipeline.log 2>&1
 ```
 
 ## API Keys
@@ -114,7 +114,7 @@ crontab -e
 
 **Error: `pyarrow` not found**
 ```bash
-source .venv/bin/activate
+source ~/.openbb_platform/.openbb_venv/bin/activate
 pip install pyarrow
 ```
 

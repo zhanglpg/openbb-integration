@@ -143,7 +143,7 @@ openbb/
 ```bash
 # Activate environment
 cd /Users/lipingzhang/.openclaw/workspace/projects/openbb
-source .venv/bin/activate
+source ~/.openbb_platform/.openbb_venv/bin/activate
 
 # Run quick test
 python src/run_pipeline.py test
