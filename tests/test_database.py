@@ -336,6 +336,22 @@ class TestSaveEconomicIndicators:
             )
         assert len(result) == 2
 
+    def test_save_with_symbol_column_name(self, tmp_db):
+        """Regression: FRED data has value column named after the series symbol."""
+        df = pd.DataFrame({
+            "date": ["2024-01-01", "2024-02-01"],
+            "VIXCLS": [18.5, 19.0],
+        })
+        tmp_db.save_economic_indicators(df, "VIXCLS")
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            result = pd.read_sql_query(
+                "SELECT date, value FROM economic_indicators WHERE series_id = 'VIXCLS' ORDER BY date",
+                conn,
+            )
+        assert len(result) == 2
+        assert result["value"].iloc[0] == 18.5
+        assert result["value"].iloc[1] == 19.0
+
     def test_nan_values_stored_as_null(self, tmp_db):
         """Regression: NaN values must be stored as SQL NULL, not string 'nan'."""
         df = pd.DataFrame({"date": ["2024-01-01", "2024-02-01"], "value": [1.0, float("nan")]})

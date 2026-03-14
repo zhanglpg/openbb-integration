@@ -5,6 +5,63 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
+from economic_dashboard import _normalize_dataframe
+
+
+class TestNormalizeDataframe:
+    """Tests for _normalize_dataframe() — column name normalisation."""
+
+    def test_passthrough_when_columns_already_correct(self):
+        df = pd.DataFrame({"date": ["2024-01-01"], "value": [42.0]})
+        result = _normalize_dataframe(df)
+        assert "date" in result.columns
+        assert "value" in result.columns
+        assert result["value"].iloc[0] == 42.0
+
+    def test_series_symbol_as_value_column(self):
+        """FRED returns value column named after the series (e.g. 'VIXCLS')."""
+        df = pd.DataFrame({"date": ["2024-01-01"], "VIXCLS": [18.5]})
+        result = _normalize_dataframe(df, series_id="VIXCLS")
+        assert "value" in result.columns
+        assert result["value"].iloc[0] == 18.5
+
+    def test_close_column_renamed_to_value(self):
+        df = pd.DataFrame({"date": ["2024-01-01"], "close": [155.0]})
+        result = _normalize_dataframe(df)
+        assert "value" in result.columns
+        assert result["value"].iloc[0] == 155.0
+
+    def test_datetime_index_reset(self):
+        dates = pd.to_datetime(["2024-01-01", "2024-02-01"])
+        df = pd.DataFrame({"value": [1.0, 2.0]}, index=dates)
+        df.index.name = "date"
+        result = _normalize_dataframe(df)
+        assert "date" in result.columns
+        assert "value" in result.columns
+        assert len(result) == 2
+
+    def test_fallback_to_first_numeric_column(self):
+        df = pd.DataFrame({"date": ["2024-01-01"], "some_metric": [99.9]})
+        result = _normalize_dataframe(df)
+        assert "value" in result.columns
+        assert result["value"].iloc[0] == 99.9
+
+    def test_period_column_renamed_to_date(self):
+        df = pd.DataFrame({"period": ["2024-01-01"], "value": [7.5]})
+        result = _normalize_dataframe(df)
+        assert "date" in result.columns
+        assert result["date"].iloc[0] == "2024-01-01"
+
+    def test_series_id_takes_priority_over_close(self):
+        """When both the series column and 'close' exist, prefer series_id."""
+        df = pd.DataFrame({
+            "date": ["2024-01-01"],
+            "DGS10": [4.25],
+            "close": [100.0],
+        })
+        result = _normalize_dataframe(df, series_id="DGS10")
+        assert result["value"].iloc[0] == 4.25
+
 
 class TestEconomicDashboard:
     @pytest.fixture(autouse=True)
@@ -41,6 +98,18 @@ class TestEconomicDashboard:
         self.dashboard.fetch_fred_series("GDP", start_date="2024-01-01", end_date="2024-12-31")
         call_kwargs = self.mock_obb.economy.fred_series.call_args.kwargs
         assert call_kwargs["start_date"] == "2024-01-01"
+
+    def test_fetch_fred_series_symbol_column(self):
+        """Regression: FRED returns value in a column named after the series."""
+        df = pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=3, freq="MS"),
+            "VIXCLS": [18.5, 19.0, 17.8],
+        })
+        self.mock_obb.economy.fred_series.return_value = self._make_result(df)
+        result = self.dashboard.fetch_fred_series("VIXCLS")
+        assert result is not None
+        assert "value" in result.columns
+        assert result["value"].iloc[0] == 18.5
 
     def test_fetch_fred_series_error(self):
         self.mock_obb.economy.fred_series.side_effect = Exception("API error")
