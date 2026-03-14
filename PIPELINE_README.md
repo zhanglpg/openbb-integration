@@ -13,6 +13,21 @@ source .venv/bin/activate
 python pipeline.py
 ```
 
+## Database Reset (Schema v2)
+
+The database schema was overhauled in schema v2. If you have an older
+`data/openbb_data.db` or `data/metadata.db`, delete them and let the
+pipeline recreate from scratch:
+
+```bash
+rm -f data/openbb_data.db data/metadata.db
+```
+
+The pipeline accumulates data across runs (prices, fundamentals, filings,
+economic indicators are all additive).  Future incompatible schema changes
+will require a migration script — the `schema_version` table in the database
+tracks which version is active.
+
 ## What It Does
 
 1. **Loads watchlist** from `data/watchlist.txt`
@@ -21,13 +36,13 @@ python pipeline.py
 4. **Fetches SEC filings** (10-K, 10-Q only)
 5. **Stores data** in:
    - Parquet files: `data/prices/`, `data/fundamentals/`, `data/sec/`
-   - SQLite database: `data/metadata.db`
+   - SQLite database: `data/openbb_data.db`
 
 ## Output
 
 ```
 data/
-├── metadata.db           # SQLite database with fetch logs, filings metadata
+├── openbb_data.db        # SQLite database (prices, fundamentals, filings, indicators)
 ├── watchlist.txt         # Symbol list
 ├── prices/
 │   ├── AAPL_prices_20260314.parquet
@@ -58,22 +73,21 @@ YOUR_SYMBOL
 ### Query Data
 
 ```python
-import pandas as pd
-from src.storage import DataStorage
+from src.database import Database
 
-storage = DataStorage()
+db = Database()
 
-# Load prices
-aapl_prices = storage.load_prices('AAPL')
+# Load latest prices
+aapl_prices = db.get_latest_prices('AAPL', days=30)
 print(aapl_prices.tail())
 
-# Load fundamentals
-aapl_metrics = storage.load_fundamentals('AAPL', 'metrics')
-print(aapl_metrics)
+# Batch query for multiple symbols
+latest = db.get_latest_prices_batch(['AAPL', 'MSFT', 'GOOGL'])
+print(latest)
 
-# Load SEC filings
-aapl_filings = pd.read_parquet(storage.sec_dir / 'AAPL_sec_filings_20260314.parquet')
-print(aapl_filings[['filing_date', 'report_type', 'report_url']].head())
+# Economic indicators
+indicators = db.get_latest_economic_indicators(['VIXCLS', 'DGS10'])
+print(indicators)
 ```
 
 ## Scheduling

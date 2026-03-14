@@ -1,13 +1,12 @@
 """Tests for src/config.py."""
 
 from config import (
-    ALERT_THRESHOLDS,
     CACHE_DIR,
     DATA_DIR,
     DB_PATH,
     ECONOMIC_INDICATORS,
+    PIPELINE_DEFAULTS,
     PROJECT_ROOT,
-    REFRESH_INTERVALS,
     SEC_FILING_TYPES,
     WATCHLIST,
 )
@@ -71,23 +70,14 @@ class TestSecFilingTypes:
         assert "10-Q" in SEC_FILING_TYPES
 
 
-class TestRefreshIntervals:
-    def test_all_intervals_positive(self):
-        for key, hours in REFRESH_INTERVALS.items():
-            assert hours > 0, f"Refresh interval for {key} must be positive"
+class TestPipelineDefaults:
+    def test_all_values_positive(self):
+        for key, value in PIPELINE_DEFAULTS.items():
+            assert value > 0, f"Pipeline default {key}={value} must be positive"
 
-    def test_known_intervals_exist(self):
-        assert "prices" in REFRESH_INTERVALS
-        assert "fundamentals" in REFRESH_INTERVALS
-        assert "sec_filings" in REFRESH_INTERVALS
-        assert "economic" in REFRESH_INTERVALS
-
-
-class TestAlertThresholds:
-    def test_all_thresholds_positive(self):
-        for key, threshold in ALERT_THRESHOLDS.items():
-            assert 0 < threshold < 1, f"Threshold {key}={threshold} should be between 0 and 1"
-
-    def test_known_thresholds_exist(self):
-        assert "stock_daily_change" in ALERT_THRESHOLDS
-        assert "etf_daily_change" in ALERT_THRESHOLDS
+    def test_known_defaults_exist(self):
+        assert "price_lookback_days" in PIPELINE_DEFAULTS
+        assert "sec_filing_limit" in PIPELINE_DEFAULTS
+        assert "api_call_delay" in PIPELINE_DEFAULTS
+        assert "max_retries" in PIPELINE_DEFAULTS
+        assert "retry_backoff_base" in PIPELINE_DEFAULTS

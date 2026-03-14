@@ -4,15 +4,13 @@ from pathlib import Path
 
 # Project paths
 PROJECT_ROOT = Path(__file__).parent.parent
-
-# Data storage - centralized in ~/.openbb_platform/data
 DATA_DIR = Path.home() / ".openbb_platform" / "data"
 CACHE_DIR = DATA_DIR / "cache"
 DB_PATH = DATA_DIR / "openbb_data.db"
 
 # Ensure directories exist
-DATA_DIR.mkdir(exist_ok=True)
-CACHE_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Watchlist configuration
 WATCHLIST = {
@@ -36,17 +34,11 @@ ECONOMIC_INDICATORS = {
 # SEC filing types to monitor
 SEC_FILING_TYPES = ["10-K", "10-Q", "8-K", "DEF 14A"]
 
-# Data refresh intervals (in hours)
-REFRESH_INTERVALS = {
-    "prices": 1,  # Hourly during market hours
-    "fundamentals": 24,  # Daily
-    "sec_filings": 6,  # Every 6 hours
-    "economic": 24,  # Daily
-}
-
-# Alert thresholds
-ALERT_THRESHOLDS = {
-    "stock_daily_change": 0.05,  # 5%
-    "etf_daily_change": 0.03,  # 3%
-    "china_exposure_change": 0.04,  # 4%
+# Pipeline defaults — referenced by run_pipeline.py, watchlist_fetcher.py, dashboard.py
+PIPELINE_DEFAULTS = {
+    "price_lookback_days": 30,
+    "sec_filing_limit": 10,
+    "api_call_delay": 0.5,  # seconds between consecutive API calls
+    "max_retries": 3,
+    "retry_backoff_base": 2,  # exponential backoff base in seconds
 }

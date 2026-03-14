@@ -104,3 +104,38 @@ class TestWatchlistFetcher:
         self.fetcher.db.save_prices(price_df, "AAPL")
         summary = self.fetcher.get_watchlist_summary()
         assert isinstance(summary, pd.DataFrame)
+
+    def test_get_watchlist_summary_calculates_change_pct(self):
+        """Bug #11 regression: change_percent column didn't exist, always showed 0%.
+        Verify that change_pct is correctly calculated from two price rows."""
+        price_df = pd.DataFrame({
+            "date": ["2025-06-01", "2025-06-02"],
+            "open": [99.0, 104.0],
+            "high": [101.0, 106.0],
+            "low": [98.0, 103.0],
+            "close": [100.0, 105.0],
+            "volume": [1000000, 1100000],
+        })
+        self.fetcher.db.save_prices(price_df, "AAPL")
+        summary = self.fetcher.get_watchlist_summary()
+        assert not summary.empty
+        aapl = summary[summary["symbol"] == "AAPL"]
+        assert len(aapl) == 1
+        assert aapl["change"].iloc[0] == pytest.approx(5.0)
+        assert aapl["change_pct"].iloc[0] == pytest.approx(5.0)  # (105-100)/100 * 100
+
+    def test_get_watchlist_summary_skips_single_row_symbol(self):
+        """Bug #12 regression: single price row should not produce a summary entry
+        (would have given misleading 0% change or crash without bounds check)."""
+        price_df = pd.DataFrame({
+            "date": ["2025-06-01"],
+            "open": [99.0],
+            "high": [101.0],
+            "low": [98.0],
+            "close": [100.0],
+            "volume": [1000000],
+        })
+        self.fetcher.db.save_prices(price_df, "AAPL")
+        summary = self.fetcher.get_watchlist_summary()
+        # Symbol with only 1 row should be excluded (can't compute change)
+        assert "AAPL" not in summary.get("symbol", pd.Series()).values
