@@ -142,8 +142,8 @@ openbb/
 ### Data Pipeline
 ```bash
 # Activate environment
-cd /Users/lipingzhang/.openclaw/workspace/projects/openbb
-source ~/.openbb_platform/.openbb_venv/bin/activate
+cd ~/.openbb_platform
+source .venv/bin/activate
 
 # Run quick test
 python src/run_pipeline.py test

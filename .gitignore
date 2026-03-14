@@ -43,6 +43,10 @@ htmlcov/
 # Data (too large, regenerate as needed)
 data/
 
+# Settings
+system_settings.json
+user_settings.json
+
 # Logs
 *.log
 

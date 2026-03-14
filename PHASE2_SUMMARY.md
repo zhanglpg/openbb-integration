@@ -101,7 +101,7 @@ obb.economy.fred_series('UNRATE')
 
 ```bash
 # Navigate to project
-cd /Users/lipingzhang/.openclaw/workspace/projects/openbb
+cd ~/.openbb_platform
 
 # Activate environment
 source .venv/bin/activate

@@ -24,8 +24,8 @@ Interactive Streamlit dashboard for real-time portfolio monitoring with:
 
 ### 1. Activate Environment
 ```bash
-cd /Users/lipingzhang/.openclaw/workspace/projects/openbb
-source ~/.openbb_platform/.openbb_venv/bin/activate
+cd ~/.openbb_platform
+source .venv/bin/activate
 ```
 
 ### 2. Run Dashboard
