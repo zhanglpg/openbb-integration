@@ -249,6 +249,9 @@ class Database:
                         pass  # Column might already exist
         
         with sqlite3.connect(self.db_path) as conn:
+            # Delete existing data for this series to avoid duplicates
+            conn.execute('DELETE FROM economic_indicators WHERE series_id = ?', (series_id,))
+            conn.commit()
             df.to_sql('economic_indicators', conn, if_exists='append', index=False)
     
     def get_latest_prices(self, symbol: str, days: int = 30) -> pd.DataFrame:

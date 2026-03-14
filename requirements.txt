@@ -5,6 +5,9 @@ openbb[all]>=4.7.1
 pandas>=2.0.0
 pyarrow>=23.0.0
 
+# Dashboard
+streamlit>=1.30.0
+
 # Optional - for enhanced functionality
 # python-dotenv  # Environment variable management
 # sqlalchemy     # Database ORM (if needed)

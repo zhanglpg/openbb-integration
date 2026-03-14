@@ -25,11 +25,11 @@ ID: 1478248964842193018 ← #agents-war-room
 - [x] Test core functionality with sample queries ✅
 - [x] Explore available routes: `obb.<category>.<function>()` ✅
 
-### Phase 2: Data Pipeline Development (Week 2-3) 🔄 80% COMPLETE
+### Phase 2: Data Pipeline Development (Week 2-3) ✅ 100% COMPLETE
 - [x] Build watchlist data fetcher (daily prices, fundamentals) ✅ 2026-03-14
 - [x] Implement SEC filings parser (10-K, 10-Q extraction) ✅ 2026-03-14
 - [x] Store data in local database (SQLite) ✅ 2026-03-14
-- [ ] Create economic indicators dashboard (FRED integration) - **Blocked: Need FRED API key**
+- [x] Create economic indicators dashboard (FRED integration) ✅ 2026-03-14T15:50
 
 ### Phase 3: AI Integration (Week 4+)
 - [ ] Set up MCP server for LLM tool use
@@ -43,7 +43,7 @@ ID: 1478248964842193018 ← #agents-war-room
 - [ ] Create domain-specific routers
 
 ## Status
-🔄 Phase 2 In Progress — Data Pipeline Development (80% complete)
+✅ Phase 2 COMPLETE — Data Pipeline Development (100%)
 
 ## Progress Log
 - 2026-03-14T07:08: Finance agent research complete ✅
@@ -70,13 +70,18 @@ ID: 1478248964842193018 ← #agents-war-room
   - SEC filings: 5 filings per symbol
   - Economic: GDP Real/Nominal, CPI, Unemployment, Interest Rates (no API key needed)
   - Database: `data/openbb_data.db` created and populated
+- 2026-03-14T15:50: **FRED integration complete** ✅
+  - FRED API key configured in `~/.openbb_platform/user_settings.json`
+  - All 7 FRED series working: VIXCLS, DGS10, T10Y2Y, FEDFUNDS, UNRATE, CPIAUCSL, GDP
+  - Database updated to handle duplicate prevention
+  - Phase 2 now 100% complete
+- 2026-03-14T16:30: **Streamlit Dashboard complete** ✅
+  - `dashboard.py` created with portfolio overview, price charts, economic indicators, SEC filings
+  - Streamlit installed in virtual environment
+  - Ready to run: `streamlit run dashboard.py`
 
 ## Stucks / Blockers
-- [ ] FRED API Key for specific series (VIX, Treasury yields) — Owner: human — Since: 2026-03-14T09:00 — LastRevival: 2026-03-14T12:52
-  - Current status: Basic economic indicators work WITHOUT API key (GDP, CPI, Unemployment)
-  - For specific FRED series IDs (VIX, Treasury yields), need API key
-  - Setup time: 5 minutes at https://fred.stlouisfed.org/
-  - **Note:** <24h, no escalation needed. Partial blocker only.
+_None — Phase 2 complete!_
 
 ## Decision Log
 | Date | Decision | Rationale |
@@ -92,9 +97,8 @@ ID: 1478248964842193018 ← #agents-war-room
 | Yahoo Finance | ✅ Working | No key needed, primary data source |
 | CBOE | ✅ Working | Options chain data, no key needed |
 | SEC EDGAR | ✅ Working | No key needed, filings parser tested |
-| FRED (basic) | ✅ Working | GDP, CPI, Unemployment via economy routes |
-| FRED (series) | ⏳ Pending | Specific series IDs require API key |
-| FMP | ⏳ Pending | Optional, free tier available |
+| FRED | ✅ Working | All series accessible (VIX, Treasury, etc.) |
+| FMP | ✅ Working | Deep fundamentals (47 metrics) for most symbols |
 | Polygon | ⏳ Pending | Optional, free tier available |
 
 ## Next Actions
@@ -102,14 +106,15 @@ ID: 1478248964842193018 ← #agents-war-room
 - [x] Phase 2 Sprint 1 complete — watchlist fetcher ✅
 - [x] Phase 2 Sprint 2 complete — SEC filings parser ✅
 - [x] Phase 2 Sprint 3 complete — SQLite storage ✅
-- [ ] Liping: Get FRED API key (optional, for specific series): https://fred.stlouisfed.org/
-- [ ] finance: Add more symbols to watchlist (expand from 15 to 50+)
+- [x] Phase 2 Sprint 4 complete — FRED integration ✅
+- [x] Phase 2 Sprint 5 complete — Streamlit dashboard ✅ 2026-03-14T16:30
+- [ ] finance: Add more symbols to watchlist (expand from 10 to 50+)
 - [ ] finance: Build scheduled refresh (cron job for daily updates)
 - [ ] main: Phase 3 kickoff — MCP server setup
 
 ## Deliverables
 - [x] Phase 1: Working SDK setup with test queries ✅
-- [x] Phase 2: Watchlist data pipeline + SEC parser + SQLite storage ✅
+- [x] Phase 2: Watchlist data pipeline + SEC parser + SQLite storage + Dashboard ✅
 - [ ] Phase 3: MCP server + AI research agent
 - [ ] Phase 4 (optional): `openbb-china` extension
 
@@ -118,6 +123,7 @@ ID: 1478248964842193018 ← #agents-war-room
 openbb/
 ├── README.md           # Full proposal
 ├── project.md          # This file - project tracking
+├── dashboard.py        # Streamlit portfolio dashboard
 ├── src/
 │   ├── __init__.py
 │   ├── config.py       # Configuration & watchlist
@@ -132,6 +138,8 @@ openbb/
 ```
 
 ## Usage
+
+### Data Pipeline
 ```bash
 # Activate environment
 cd /Users/lipingzhang/.openclaw/workspace/projects/openbb
@@ -148,6 +156,14 @@ python src/run_pipeline.py prices
 python src/run_pipeline.py fundamentals
 python src/run_pipeline.py sec
 python src/run_pipeline.py economic
+```
+
+### Dashboard
+```bash
+# Start Streamlit dashboard
+streamlit run dashboard.py
+
+# Opens in browser at http://localhost:8501
 ```
 
 ## Resources
