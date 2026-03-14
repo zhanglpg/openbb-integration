@@ -154,11 +154,15 @@ def main():
     with col1:
         st.markdown("**Real GDP**")
         gdp_real = get_gdp_real(dashboard)
+        if gdp_real is None and "GDP_REAL" in dashboard.last_errors:
+            st.error(f"Fetch failed: {dashboard.last_errors['GDP_REAL']}")
         render_chart(gdp_real, title="Real GDP")
 
     with col2:
         st.markdown("**Nominal GDP**")
         gdp_nominal = get_gdp_nominal(dashboard)
+        if gdp_nominal is None and "GDP_NOMINAL" in dashboard.last_errors:
+            st.error(f"Fetch failed: {dashboard.last_errors['GDP_NOMINAL']}")
         render_chart(gdp_nominal, title="Nominal GDP")
 
     st.divider()
@@ -173,11 +177,15 @@ def main():
     with col1:
         st.markdown("**Consumer Price Index (CPI)**")
         cpi = get_cpi(dashboard)
+        if cpi is None and "CPI" in dashboard.last_errors:
+            st.error(f"Fetch failed: {dashboard.last_errors['CPI']}")
         render_chart(cpi, title="CPI")
 
     with col2:
         st.markdown("**Unemployment Rate**")
         unemployment = get_unemployment(dashboard)
+        if unemployment is None and "UNEMPLOYMENT" in dashboard.last_errors:
+            st.error(f"Fetch failed: {dashboard.last_errors['UNEMPLOYMENT']}")
         render_chart(unemployment, title="Unemployment Rate")
 
     st.divider()
@@ -188,6 +196,8 @@ def main():
     st.subheader("💰 Interest Rates")
 
     interest = get_interest_rates(dashboard)
+    if interest is None and "INTEREST_RATES" in dashboard.last_errors:
+        st.error(f"Fetch failed: {dashboard.last_errors['INTEREST_RATES']}")
     render_chart(interest, title="Interest Rates")
 
     st.divider()

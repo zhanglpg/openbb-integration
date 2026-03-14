@@ -31,6 +31,7 @@ def render_sidebar_controls():
                     st.success("✅ Data refreshed successfully!")
                 except Exception as e:
                     st.error(f"❌ Error refreshing data: {str(e)}")
+            st.cache_data.clear()
             st.rerun()
 
     with col2:

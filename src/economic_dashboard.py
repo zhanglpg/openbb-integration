@@ -74,6 +74,8 @@ class EconomicDashboard:
     def __init__(self):
         self.db = Database()
         obb.user.preferences.output_type = "dataframe"
+        # Track last error per fetch for UI diagnostics
+        self.last_errors: dict[str, str] = {}
 
     def fetch_fred_series(
         self, series_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None
@@ -111,8 +113,10 @@ class EconomicDashboard:
                     "Set it in ~/.openbb_platform/user_settings.json",
                     series_id,
                 )
+                self.last_errors[f"FRED_{series_id}"] = f"API key issue: {e}"
             else:
                 logger.error("Error fetching FRED series %s: %s", series_id, e)
+                self.last_errors[f"FRED_{series_id}"] = str(e)
         return None
 
     def fetch_gdp_real(self) -> Optional[pd.DataFrame]:
@@ -132,6 +136,7 @@ class EconomicDashboard:
 
         except Exception as e:
             logger.error("Error fetching GDP real: %s", e)
+            self.last_errors["GDP_REAL"] = str(e)
         return None
 
     def fetch_gdp_nominal(self) -> Optional[pd.DataFrame]:
@@ -151,6 +156,7 @@ class EconomicDashboard:
 
         except Exception as e:
             logger.error("Error fetching GDP nominal: %s", e)
+            self.last_errors["GDP_NOMINAL"] = str(e)
         return None
 
     def fetch_cpi(self) -> Optional[pd.DataFrame]:
@@ -170,6 +176,7 @@ class EconomicDashboard:
 
         except Exception as e:
             logger.error("Error fetching CPI: %s", e)
+            self.last_errors["CPI"] = str(e)
         return None
 
     def fetch_unemployment(self) -> Optional[pd.DataFrame]:
@@ -189,6 +196,7 @@ class EconomicDashboard:
 
         except Exception as e:
             logger.error("Error fetching unemployment: %s", e)
+            self.last_errors["UNEMPLOYMENT"] = str(e)
         return None
 
     def fetch_interest_rates(self) -> Optional[pd.DataFrame]:
@@ -208,6 +216,7 @@ class EconomicDashboard:
 
         except Exception as e:
             logger.error("Error fetching interest rates: %s", e)
+            self.last_errors["INTEREST_RATES"] = str(e)
         return None
 
     def update_all_indicators(self):
