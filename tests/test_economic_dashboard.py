@@ -190,6 +190,53 @@ class TestEconomicDashboard:
             assert pd.notna(row["value"])
             assert pd.notna(row["date"])
 
+    def test_fred_symbol_column_full_roundtrip(self):
+        """Regression: FRED data with symbol-named column flows through
+        fetch → normalize → save → read and returns non-NULL values."""
+        # Simulate FRED returning data with the series symbol as column name
+        fred_df = pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=5, freq="MS"),
+            "VIXCLS": [18.5, 19.0, 17.8, 20.1, 16.3],
+        })
+        self.mock_obb.economy.fred_series.return_value = self._make_result(fred_df)
+
+        # Step 1: Fetch (normalizes columns internally)
+        fetched = self.dashboard.fetch_fred_series("VIXCLS")
+        assert fetched is not None
+        assert "value" in fetched.columns
+        assert fetched["value"].notna().all()
+
+        # Step 2: Save to DB
+        self.dashboard.db.save_economic_indicators(fetched, "VIXCLS")
+
+        # Step 3: Read back via the same path the dashboard uses
+        result = self.dashboard.db.get_latest_economic_indicators(["VIXCLS"])
+        assert len(result) == 1
+        assert result["series_id"].iloc[0] == "VIXCLS"
+        assert pd.notna(result["value"].iloc[0])
+        assert result["value"].iloc[0] == 16.3  # latest value
+
+    def test_partial_series_in_db(self):
+        """Dashboard handles DB having data for some series but not others."""
+        # Save data for only 2 of the 4 key indicators
+        df = pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=3, freq="MS"),
+            "value": [4.25, 4.30, 4.35],
+        })
+        self.dashboard.db.save_economic_indicators(df, "DGS10")
+        self.dashboard.db.save_economic_indicators(df, "FEDFUNDS")
+
+        # Request all 4 key indicators — should return only the 2 that exist
+        result = self.dashboard.db.get_latest_economic_indicators(
+            ["VIXCLS", "DGS10", "T10Y2Y", "FEDFUNDS"]
+        )
+        assert len(result) == 2
+        assert set(result["series_id"]) == {"DGS10", "FEDFUNDS"}
+        # Values should be non-NULL
+        for _, row in result.iterrows():
+            assert pd.notna(row["value"])
+            assert row["value"] == 4.35
+
     def test_generate_dashboard_report_empty(self):
         # All fetches return None
         self.mock_obb.economy.gdp.real.side_effect = Exception("no data")
