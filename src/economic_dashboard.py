@@ -61,6 +61,7 @@ class EconomicDashboard:
     def fetch_gdp_real(self) -> Optional[pd.DataFrame]:
         """Fetch real GDP data (no API key required)."""
         try:
+
             def _call():
                 return obb.economy.gdp.real()
 
@@ -78,6 +79,7 @@ class EconomicDashboard:
     def fetch_gdp_nominal(self) -> Optional[pd.DataFrame]:
         """Fetch nominal GDP data (no API key required)."""
         try:
+
             def _call():
                 return obb.economy.gdp.nominal()
 
@@ -95,6 +97,7 @@ class EconomicDashboard:
     def fetch_cpi(self) -> Optional[pd.DataFrame]:
         """Fetch Consumer Price Index data."""
         try:
+
             def _call():
                 return obb.economy.cpi()
 
@@ -112,6 +115,7 @@ class EconomicDashboard:
     def fetch_unemployment(self) -> Optional[pd.DataFrame]:
         """Fetch unemployment rate data."""
         try:
+
             def _call():
                 return obb.economy.unemployment()
 
@@ -129,6 +133,7 @@ class EconomicDashboard:
     def fetch_interest_rates(self) -> Optional[pd.DataFrame]:
         """Fetch interest rates data."""
         try:
+
             def _call():
                 return obb.economy.interest_rates()
 
@@ -220,7 +225,8 @@ class EconomicDashboard:
 
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
     dashboard = EconomicDashboard()

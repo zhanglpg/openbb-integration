@@ -162,32 +162,20 @@ class Database:
             # Indexes
             # ----------------------------------------------------------
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_price_history_symbol"
-                " ON price_history(symbol)"
+                "CREATE INDEX IF NOT EXISTS idx_price_history_symbol ON price_history(symbol)"
             )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_price_history_date ON price_history(date)")
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_price_history_date"
-                " ON price_history(date)"
+                "CREATE INDEX IF NOT EXISTS idx_fundamentals_symbol ON fundamentals(symbol)"
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_fundamentals_symbol"
-                " ON fundamentals(symbol)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_sec_filings_symbol"
-                " ON sec_filings(symbol)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sec_filings_symbol ON sec_filings(symbol)")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_economic_indicators_series_id"
                 " ON economic_indicators(series_id)"
             )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_fetch_log_symbol ON fetch_log(symbol)")
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_fetch_log_symbol"
-                " ON fetch_log(symbol)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_fetch_log_data_type"
-                " ON fetch_log(data_type)"
+                "CREATE INDEX IF NOT EXISTS idx_fetch_log_data_type ON fetch_log(data_type)"
             )
 
             conn.commit()
@@ -270,9 +258,17 @@ class Database:
 
     # Columns we explicitly track. Anything else goes into extra_data.
     _FUNDAMENTALS_KNOWN_COLS = {
-        "market_cap", "pe_ratio", "pb_ratio", "debt_to_equity",
-        "return_on_equity", "payout_ratio", "dividend_yield",
-        "revenue", "net_income", "eps", "free_cash_flow",
+        "market_cap",
+        "pe_ratio",
+        "pb_ratio",
+        "debt_to_equity",
+        "return_on_equity",
+        "payout_ratio",
+        "dividend_yield",
+        "revenue",
+        "net_income",
+        "eps",
+        "free_cash_flow",
     }
 
     def save_fundamentals(self, df: pd.DataFrame, symbol: str):
@@ -320,8 +316,13 @@ class Database:
     # ==================================================================
 
     _SEC_KNOWN_COLS = {
-        "filing_date", "report_type", "accession_number", "report_url",
-        "report_date", "filing_detail_url", "primary_doc",
+        "filing_date",
+        "report_type",
+        "accession_number",
+        "report_url",
+        "report_date",
+        "filing_detail_url",
+        "primary_doc",
         "primary_doc_description",
     }
 
@@ -333,10 +334,23 @@ class Database:
         df = df.copy()
         df["symbol"] = symbol
 
-        # Ensure date columns are strings
+        # Ensure date columns are strings (coerce invalid dates to NaT)
         for col in ["filing_date", "report_date", "accepted_date"]:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime("%Y-%m-%d")
+                # Replace pandas "NaT" string (from strftime on NaT) with None
+                df[col] = df[col].replace("NaT", None)
+
+        # filing_date is NOT NULL in schema — drop rows without it
+        if "filing_date" in df.columns:
+            before_len = len(df)
+            df = df.dropna(subset=["filing_date"])
+            if len(df) < before_len:
+                logger.warning(
+                    "Dropped %d rows with invalid filing_date for %s",
+                    before_len - len(df),
+                    symbol,
+                )
 
         # accession_number is NOT NULL in schema — drop rows without it
         if "accession_number" in df.columns:
@@ -372,9 +386,7 @@ class Database:
                 placeholders = ", ".join(["?"] * len(cols))
                 col_names = ", ".join(cols)
                 values = (
-                    [symbol]
-                    + list(known_values.values())
-                    + [json.dumps(extra) if extra else None]
+                    [symbol] + list(known_values.values()) + [json.dumps(extra) if extra else None]
                 )
 
                 conn.execute(
@@ -522,7 +534,11 @@ class Database:
     ):
         """Log a fetch operation (alias kept for backward compatibility)."""
         self.log_fetch(
-            symbol or "", data_type, provider="", status=status, record_count=rows_fetched,
+            symbol or "",
+            data_type,
+            provider="",
+            status=status,
+            record_count=rows_fetched,
         )
 
     def log_fetch(

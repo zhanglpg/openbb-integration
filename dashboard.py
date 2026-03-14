@@ -23,7 +23,7 @@ st.set_page_config(
     page_title="Portfolio Dashboard",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # Derive portfolio structure and flat symbol list from config
@@ -53,9 +53,9 @@ def get_latest_prices_with_change(_db: Database) -> pd.DataFrame:
 def get_price_history(symbol: str, _db: Database, days: int = 90) -> pd.DataFrame:
     """Get price history for a symbol."""
     df = _db.get_latest_prices(symbol, days=days)
-    if 'date' in df.columns:
-        df['date'] = pd.to_datetime(df['date'])
-        df = df.sort_values('date')
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date")
     return df
 
 
@@ -80,7 +80,7 @@ def get_sec_filings(symbol: str, _db: Database, limit: int = 10) -> pd.DataFrame
 
     df = pd.read_parquet(files[-1])
     # Filter for 10-K and 10-Q
-    filings = df[df['report_type'].isin(['10-K', '10-Q', '8-K', '10-K/A', '10-Q/A'])]
+    filings = df[df["report_type"].isin(["10-K", "10-Q", "8-K", "10-K/A", "10-Q/A"])]
     return filings.head(limit)
 
 
@@ -115,11 +115,7 @@ def main():
     st.sidebar.divider()
 
     # Symbol selector
-    selected_symbol = st.sidebar.selectbox(
-        "Select Symbol",
-        ALL_SYMBOLS,
-        index=0
-    )
+    selected_symbol = st.sidebar.selectbox("Select Symbol", ALL_SYMBOLS, index=0)
 
     # Initialize database (cached)
     db = get_db()
@@ -135,14 +131,14 @@ def main():
         # Build display data from batch result
         display_data = []
         for symbol in ALL_SYMBOLS:
-            symbol_df = prices_with_change[prices_with_change['symbol'] == symbol]
+            symbol_df = prices_with_change[prices_with_change["symbol"] == symbol]
             if len(symbol_df) >= 2:
                 latest = symbol_df.iloc[0]
                 previous = symbol_df.iloc[1]
-                price = latest['close']
-                change_pct = ((latest['close'] - previous['close']) / previous['close']) * 100
+                price = latest["close"]
+                change_pct = ((latest["close"] - previous["close"]) / previous["close"]) * 100
             elif len(symbol_df) == 1:
-                price = symbol_df.iloc[0]['close']
+                price = symbol_df.iloc[0]["close"]
                 change_pct = 0
             else:
                 continue
@@ -154,22 +150,24 @@ def main():
                     sector = sec
                     break
 
-            display_data.append({
-                "Symbol": symbol,
-                "Sector": sector,
-                "Price": f"${price:.2f}",
-                "Change": f"{change_pct:+.2f}%",
-                "Change Value": change_pct,
-            })
+            display_data.append(
+                {
+                    "Symbol": symbol,
+                    "Sector": sector,
+                    "Price": f"${price:.2f}",
+                    "Change": f"{change_pct:+.2f}%",
+                    "Change Value": change_pct,
+                }
+            )
 
         if display_data:
             display_df = pd.DataFrame(display_data)
 
             # Color-code changes
             def color_change(val):
-                if isinstance(val, str) and val.startswith('+'):
+                if isinstance(val, str) and val.startswith("+"):
                     return "color: green"
-                elif isinstance(val, str) and val.startswith('-'):
+                elif isinstance(val, str) and val.startswith("-"):
                     return "color: red"
                 return ""
 
@@ -177,7 +175,7 @@ def main():
             st.dataframe(
                 display_df.style.map(color_change, subset=["Change"]),
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
             )
         else:
             st.warning("⚠️ No price data available. Click 'Refresh Data' to fetch.")
@@ -196,16 +194,16 @@ def main():
 
         history_df = get_price_history(selected_symbol, db, days=90)
 
-        if not history_df.empty and 'date' in history_df.columns and len(history_df) >= 2:
+        if not history_df.empty and "date" in history_df.columns and len(history_df) >= 2:
             # Create chart
-            chart_data = history_df.set_index('date')[['close', 'open']]
-            chart_data.columns = ['Close', 'Open']
+            chart_data = history_df.set_index("date")[["close", "open"]]
+            chart_data.columns = ["Close", "Open"]
 
             st.line_chart(chart_data)
 
             # Show stats
-            latest_price = history_df['close'].iloc[-1]
-            oldest_price = history_df['close'].iloc[0]
+            latest_price = history_df["close"].iloc[-1]
+            oldest_price = history_df["close"].iloc[0]
             period_change = ((latest_price - oldest_price) / oldest_price) * 100
 
             col_a, col_b, col_c = st.columns(3)
@@ -213,7 +211,7 @@ def main():
             col_b.metric("90-Day Change", f"{period_change:+.1f}%")
             col_c.metric("Data Points", len(history_df))
         elif not history_df.empty and len(history_df) == 1:
-            latest_price = history_df['close'].iloc[0]
+            latest_price = history_df["close"].iloc[0]
             st.metric("Latest Price", f"${latest_price:.2f}")
             st.info("Only 1 data point available — change calculation requires at least 2.")
         else:
@@ -240,10 +238,10 @@ def main():
             key_indicators = ["VIXCLS", "DGS10", "T10Y2Y", "FEDFUNDS"]
 
             for series_id in key_indicators:
-                row = econ_df[econ_df['series_id'] == series_id]
+                row = econ_df[econ_df["series_id"] == series_id]
                 if not row.empty:
-                    value = row['value'].iloc[-1]
-                    date = row['date'].iloc[-1]
+                    value = row["value"].iloc[-1]
+                    date = row["date"].iloc[-1]
                     name = friendly_names.get(series_id, series_id)
 
                     # Format value
@@ -269,11 +267,11 @@ def main():
 
     if not filings_df.empty:
         # Display filings table
-        display_filings = filings_df[['report_type', 'filing_date', 'report_url']].copy()
-        display_filings.columns = ['Type', 'Filing Date', 'URL']
+        display_filings = filings_df[["report_type", "filing_date", "report_url"]].copy()
+        display_filings.columns = ["Type", "Filing Date", "URL"]
 
         # Make URLs clickable
-        display_filings['URL'] = display_filings['URL'].apply(
+        display_filings["URL"] = display_filings["URL"].apply(
             lambda x: f"[View]({x})" if pd.notna(x) else ""
         )
 

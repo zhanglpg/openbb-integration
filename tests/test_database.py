@@ -92,41 +92,67 @@ class TestSavePrices:
         assert len(result) == 5
 
     def test_rejects_non_positive_prices(self, tmp_db):
-        df = pd.DataFrame({
-            "date": ["2025-01-01", "2025-01-02"],
-            "close": [0, -5],
-            "open": [1, 1],
-            "high": [2, 2],
-            "low": [0.5, 0.5],
-            "volume": [100, 100],
-        })
+        df = pd.DataFrame(
+            {
+                "date": ["2025-01-01", "2025-01-02"],
+                "close": [0, -5],
+                "open": [1, 1],
+                "high": [2, 2],
+                "low": [0.5, 0.5],
+                "volume": [100, 100],
+            }
+        )
         tmp_db.save_prices(df, "BAD")
         result = tmp_db.get_latest_prices("BAD")
         assert result.empty
 
     def test_save_prices_missing_close_column(self, tmp_db):
         """Bug #7 regression: DataFrame without 'close' column should be rejected."""
-        df = pd.DataFrame({
-            "date": ["2025-01-01", "2025-01-02"],
-            "open": [150.0, 151.0],
-            "high": [155.0, 156.0],
-            "low": [149.0, 150.0],
-            "volume": [1000000, 1100000],
-        })
+        df = pd.DataFrame(
+            {
+                "date": ["2025-01-01", "2025-01-02"],
+                "open": [150.0, 151.0],
+                "high": [155.0, 156.0],
+                "low": [149.0, 150.0],
+                "volume": [1000000, 1100000],
+            }
+        )
         tmp_db.save_prices(df, "NOCL")
         result = tmp_db.get_latest_prices("NOCL")
         assert result.empty
 
+    def test_adjusted_close_not_clobbered(self, tmp_db):
+        """Regression: when both adjusted_close and adj_close exist, adj_close is preserved."""
+        df = pd.DataFrame(
+            {
+                "date": ["2025-01-01"],
+                "open": [100.0],
+                "high": [105.0],
+                "low": [99.0],
+                "close": [104.0],
+                "volume": [1000000],
+                "adj_close": [103.5],
+                "adjusted_close": [999.0],
+            }
+        )
+        tmp_db.save_prices(df, "ADJ")
+        result = tmp_db.get_latest_prices("ADJ", days=10)
+        assert len(result) == 1
+        # adj_close should be the original value, not overwritten by adjusted_close
+        assert result["adj_close"].iloc[0] == 103.5
+
     def test_save_prices_null_dates_dropped(self, tmp_db):
         """Bug #7 regression: rows with null dates should be dropped, valid rows kept."""
-        df = pd.DataFrame({
-            "date": ["2025-01-01", None, "2025-01-03"],
-            "close": [150.0, 151.0, 152.0],
-            "open": [149.0, 150.0, 151.0],
-            "high": [155.0, 156.0, 157.0],
-            "low": [148.0, 149.0, 150.0],
-            "volume": [100, 200, 300],
-        })
+        df = pd.DataFrame(
+            {
+                "date": ["2025-01-01", None, "2025-01-03"],
+                "close": [150.0, 151.0, 152.0],
+                "open": [149.0, 150.0, 151.0],
+                "high": [155.0, 156.0, 157.0],
+                "low": [148.0, 149.0, 150.0],
+                "volume": [100, 200, 300],
+            }
+        )
         tmp_db.save_prices(df, "NULLD")
         result = tmp_db.get_latest_prices("NULLD", days=10)
         assert len(result) == 2
@@ -205,12 +231,14 @@ class TestSaveSecFilings:
 
     def test_rejects_null_accession_number(self, tmp_db):
         """Rows without accession_number should be dropped."""
-        df = pd.DataFrame({
-            "filing_date": ["2025-01-15"],
-            "report_type": ["10-K"],
-            "accession_number": [None],
-            "report_url": ["https://sec.gov/10k"],
-        })
+        df = pd.DataFrame(
+            {
+                "filing_date": ["2025-01-15"],
+                "report_type": ["10-K"],
+                "accession_number": [None],
+                "report_url": ["https://sec.gov/10k"],
+            }
+        )
         tmp_db.save_sec_filings(df, "AAPL")
         with sqlite3.connect(tmp_db.db_path) as conn:
             result = pd.read_sql_query("SELECT * FROM sec_filings WHERE symbol = 'AAPL'", conn)
@@ -218,15 +246,39 @@ class TestSaveSecFilings:
 
     def test_missing_accession_number_column(self, tmp_db):
         """Bug #7: DataFrame without accession_number column should be skipped."""
-        df = pd.DataFrame({
-            "filing_date": ["2025-01-15"],
-            "report_type": ["10-K"],
-            "report_url": ["https://sec.gov/10k"],
-        })
+        df = pd.DataFrame(
+            {
+                "filing_date": ["2025-01-15"],
+                "report_type": ["10-K"],
+                "report_url": ["https://sec.gov/10k"],
+            }
+        )
         tmp_db.save_sec_filings(df, "AAPL")
         with sqlite3.connect(tmp_db.db_path) as conn:
             result = pd.read_sql_query("SELECT * FROM sec_filings WHERE symbol = 'AAPL'", conn)
         assert result.empty
+
+    def test_malformed_dates_do_not_crash(self, tmp_db):
+        """Regression: malformed filing_date should not crash (errors='coerce').
+        Rows with invalid dates are dropped since filing_date is NOT NULL."""
+        df = pd.DataFrame(
+            {
+                "filing_date": ["not-a-date", "2025-01-15"],
+                "report_type": ["10-K", "10-Q"],
+                "accession_number": ["0001-00-000001", "0001-00-000002"],
+                "report_url": ["https://sec.gov/a", "https://sec.gov/b"],
+            }
+        )
+        # Should not raise (previously would crash without errors='coerce')
+        tmp_db.save_sec_filings(df, "AAPL")
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            result = pd.read_sql_query(
+                "SELECT filing_date FROM sec_filings WHERE symbol = 'AAPL'",
+                conn,
+            )
+        # Only the valid-date row survives (malformed date row is dropped)
+        assert len(result) == 1
+        assert result["filing_date"].iloc[0] == "2025-01-15"
 
 
 class TestSaveEconomicIndicators:
@@ -250,6 +302,59 @@ class TestSaveEconomicIndicators:
                 "SELECT * FROM economic_indicators WHERE series_id = 'TEST_SERIES'", conn
             )
         assert len(result) == 3
+
+    def test_overlapping_save_preserves_existing_dates(self, tmp_db):
+        """Regression: old DELETE-then-INSERT lost data on overlapping saves.
+        INSERT OR REPLACE must keep non-overlapping rows from the first save."""
+        df1 = pd.DataFrame(
+            {"date": ["2024-01-01", "2024-02-01", "2024-03-01"], "value": [1.0, 2.0, 3.0]}
+        )
+        tmp_db.save_economic_indicators(df1, "GDP")
+
+        # Second save overlaps on 2024-03-01 but adds 2024-04-01
+        df2 = pd.DataFrame({"date": ["2024-03-01", "2024-04-01"], "value": [3.5, 4.0]})
+        tmp_db.save_economic_indicators(df2, "GDP")
+
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            result = pd.read_sql_query(
+                "SELECT date, value FROM economic_indicators WHERE series_id = 'GDP' ORDER BY date",
+                conn,
+            )
+        # All 4 dates must be present (old code would have deleted Jan+Feb)
+        assert len(result) == 4
+        assert list(result["date"]) == ["2024-01-01", "2024-02-01", "2024-03-01", "2024-04-01"]
+        # Overlapping row should have updated value
+        assert result[result["date"] == "2024-03-01"]["value"].iloc[0] == 3.5
+
+    def test_null_dates_skipped(self, tmp_db):
+        """Regression: rows with NaN dates must be silently skipped."""
+        df = pd.DataFrame({"date": ["2024-01-01", None, "2024-03-01"], "value": [1.0, 2.0, 3.0]})
+        tmp_db.save_economic_indicators(df, "TEST")
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            result = pd.read_sql_query(
+                "SELECT * FROM economic_indicators WHERE series_id = 'TEST'", conn
+            )
+        assert len(result) == 2
+
+    def test_nan_values_stored_as_null(self, tmp_db):
+        """Regression: NaN values must be stored as SQL NULL, not string 'nan'."""
+        df = pd.DataFrame({"date": ["2024-01-01", "2024-02-01"], "value": [1.0, float("nan")]})
+        tmp_db.save_economic_indicators(df, "TEST")
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            result = pd.read_sql_query(
+                "SELECT date, value FROM economic_indicators"
+                " WHERE series_id = 'TEST' ORDER BY date",
+                conn,
+            )
+        assert len(result) == 2
+        assert result["value"].iloc[0] == 1.0
+        # Second row should be SQL NULL (reads as None/NaN), not string "nan"
+        assert pd.isna(result["value"].iloc[1])
+        # Verify it's not stored as a string
+        raw = conn.execute(
+            "SELECT typeof(value) FROM economic_indicators WHERE date = '2024-02-01'"
+        ).fetchone()
+        assert raw[0] == "null"
 
 
 class TestGetLatestPrices:
@@ -325,14 +430,16 @@ class TestBatchQueries:
 
     def test_batch_with_previous_single_price(self, tmp_db):
         """Bug #11 regression: only 1 price row should return 1 row, not crash."""
-        df = pd.DataFrame({
-            "date": ["2025-01-01"],
-            "close": [100.0],
-            "open": [99.0],
-            "high": [101.0],
-            "low": [98.0],
-            "volume": [500000],
-        })
+        df = pd.DataFrame(
+            {
+                "date": ["2025-01-01"],
+                "close": [100.0],
+                "open": [99.0],
+                "high": [101.0],
+                "low": [98.0],
+                "volume": [500000],
+            }
+        )
         tmp_db.save_prices(df, "SOLO")
         result = tmp_db.get_latest_prices_batch_with_previous(["SOLO"])
         assert len(result) == 1  # only 1 row exists, can't compute change

@@ -75,9 +75,9 @@ class TestRetryFetch:
 
     @patch("retry.time.sleep")
     def test_exponential_backoff(self, mock_sleep):
-        fn = MagicMock(side_effect=[
-            Exception("timeout"), Exception("timeout"), Exception("timeout"), "data"
-        ])
+        fn = MagicMock(
+            side_effect=[Exception("timeout"), Exception("timeout"), Exception("timeout"), "data"]
+        )
         result = retry_fetch(fn, "test call", max_retries=3, backoff_base=2)
         assert result == "data"
         # backoff: 2^0=1, 2^1=2, 2^2=4

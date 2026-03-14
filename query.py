@@ -2,6 +2,7 @@
 """
 Quick Query Script - Test data access and display
 """
+
 import logging
 import sys
 from pathlib import Path
@@ -28,12 +29,12 @@ def show_prices(symbol: str, db: Database, limit: int = 5):
     logger.info("=" * 60)
 
     # Show date and key columns
-    cols_to_show = ['close', 'open', 'high', 'low', 'volume']
+    cols_to_show = ["close", "open", "high", "low", "volume"]
     available_cols = [c for c in cols_to_show if c in df.columns]
 
-    if 'date' in df.columns:
-        df_sorted = df.sort_values('date', ascending=False)
-        print(df_sorted[['date'] + available_cols].head(limit).to_string(index=False))
+    if "date" in df.columns:
+        df_sorted = df.sort_values("date", ascending=False)
+        print(df_sorted[["date"] + available_cols].head(limit).to_string(index=False))
     else:
         print(df[available_cols].tail(limit).to_string(index=False))
 
@@ -41,6 +42,7 @@ def show_prices(symbol: str, db: Database, limit: int = 5):
 def show_metrics(symbol: str, db: Database):
     """Show key metrics from fundamentals table"""
     import sqlite3
+
     query = "SELECT * FROM fundamentals WHERE symbol = ? ORDER BY fetched_at DESC LIMIT 1"
     with sqlite3.connect(db.db_path) as conn:
         df = pd.read_sql_query(query, conn, params=(symbol,))
@@ -53,8 +55,14 @@ def show_metrics(symbol: str, db: Database):
     logger.info("%s - Key Metrics", symbol)
     logger.info("=" * 60)
 
-    key_cols = ['market_cap', 'pe_ratio', 'pb_ratio',
-                'debt_to_equity', 'return_on_equity', 'dividend_yield']
+    key_cols = [
+        "market_cap",
+        "pe_ratio",
+        "pb_ratio",
+        "debt_to_equity",
+        "return_on_equity",
+        "dividend_yield",
+    ]
 
     available_cols = [c for c in key_cols if c in df.columns]
 
@@ -65,14 +73,14 @@ def show_metrics(symbol: str, db: Database):
         if col in df.columns:
             val = df[col].iloc[0]
             if pd.notna(val):
-                if col == 'market_cap':
-                    print(f"  {col:25}: ${val/1e9:.2f}B")
-                elif col in ['dividend_yield']:
-                    print(f"  {col:25}: {val*100:.2f}%")
-                elif col in ['pe_ratio', 'pb_ratio']:
+                if col == "market_cap":
+                    print(f"  {col:25}: ${val / 1e9:.2f}B")
+                elif col in ["dividend_yield"]:
+                    print(f"  {col:25}: {val * 100:.2f}%")
+                elif col in ["pe_ratio", "pb_ratio"]:
                     print(f"  {col:25}: {val:.2f}")
-                elif col in ['return_on_equity']:
-                    print(f"  {col:25}: {val*100:.2f}%")
+                elif col in ["return_on_equity"]:
+                    print(f"  {col:25}: {val * 100:.2f}%")
                 else:
                     print(f"  {col:25}: {val:.2f}")
 
@@ -80,6 +88,7 @@ def show_metrics(symbol: str, db: Database):
 def show_sec_filings(symbol: str, db: Database, limit: int = 5):
     """Show latest SEC filings"""
     import sqlite3
+
     query = "SELECT * FROM sec_filings WHERE symbol = ? ORDER BY filing_date DESC LIMIT ?"
     with sqlite3.connect(db.db_path) as conn:
         df = pd.read_sql_query(query, conn, params=(symbol, limit))
@@ -89,7 +98,7 @@ def show_sec_filings(symbol: str, db: Database, limit: int = 5):
         return
 
     # Filter for 10-K and 10-Q
-    filings = df[df['report_type'].isin(['10-K', '10-Q', '10-K/A', '10-Q/A'])]
+    filings = df[df["report_type"].isin(["10-K", "10-Q", "10-K/A", "10-Q/A"])]
 
     if filings.empty:
         logger.info("No 10-K/10-Q filings for %s", symbol)
@@ -100,7 +109,7 @@ def show_sec_filings(symbol: str, db: Database, limit: int = 5):
     logger.info("=" * 60)
 
     for _, row in filings.head(limit).iterrows():
-        url = row.get('report_url', 'N/A') or 'N/A'
+        url = row.get("report_url", "N/A") or "N/A"
         print(f"  {row['report_type']:8} | {row['filing_date']} | {url[:60]}...")
 
 
