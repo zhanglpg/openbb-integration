@@ -1,34 +1,12 @@
 """Tests for src/database.py."""
 
+import json
 import sqlite3
 
 import pandas as pd
 import pytest
 
-from database import _sanitize_column_name
-
-
-class TestSanitizeColumnName:
-    def test_valid_simple_name(self):
-        assert _sanitize_column_name("close") == '"close"'
-
-    def test_valid_underscore_name(self):
-        assert _sanitize_column_name("adj_close") == '"adj_close"'
-
-    def test_valid_leading_underscore(self):
-        assert _sanitize_column_name("_private") == '"_private"'
-
-    def test_invalid_name_with_space(self):
-        with pytest.raises(ValueError, match="Invalid column name"):
-            _sanitize_column_name("bad name")
-
-    def test_invalid_name_with_semicolon(self):
-        with pytest.raises(ValueError, match="Invalid column name"):
-            _sanitize_column_name("x; DROP TABLE")
-
-    def test_invalid_name_starting_with_number(self):
-        with pytest.raises(ValueError, match="Invalid column name"):
-            _sanitize_column_name("1col")
+from database import SCHEMA_VERSION
 
 
 class TestDatabaseInit:
@@ -41,10 +19,29 @@ class TestDatabaseInit:
         assert "fundamentals" in tables
         assert "sec_filings" in tables
         assert "economic_indicators" in tables
-        assert "fetch_metadata" in tables
+        assert "fetch_log" in tables
+        assert "watchlist" in tables
+        assert "schema_version" in tables
 
     def test_db_path_set(self, tmp_db, tmp_db_path):
         assert tmp_db.db_path == tmp_db_path
+
+    def test_schema_version_recorded(self, tmp_db):
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            cursor = conn.execute("SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1")
+            version = cursor.fetchone()[0]
+        assert version == SCHEMA_VERSION
+
+    def test_creates_indexes(self, tmp_db):
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='index'")
+            indexes = {row[0] for row in cursor.fetchall()}
+        assert "idx_price_history_symbol" in indexes
+        assert "idx_price_history_date" in indexes
+        assert "idx_fundamentals_symbol" in indexes
+        assert "idx_sec_filings_symbol" in indexes
+        assert "idx_economic_indicators_series_id" in indexes
+        assert "idx_fetch_log_symbol" in indexes
 
 
 class TestSavePrices:
@@ -86,6 +83,26 @@ class TestSavePrices:
         result = tmp_db.get_latest_prices("GOOGL", days=10)
         assert all(result["symbol"] == "GOOGL")
 
+    def test_idempotent_rerun(self, tmp_db, sample_price_df):
+        """Running save_prices twice should not duplicate rows."""
+        tmp_db.save_prices(sample_price_df, "AAPL")
+        tmp_db.save_prices(sample_price_df, "AAPL")
+        result = tmp_db.get_latest_prices("AAPL", days=10)
+        assert len(result) == 5
+
+    def test_rejects_non_positive_prices(self, tmp_db):
+        df = pd.DataFrame({
+            "date": ["2025-01-01", "2025-01-02"],
+            "close": [0, -5],
+            "open": [1, 1],
+            "high": [2, 2],
+            "low": [0.5, 0.5],
+            "volume": [100, 100],
+        })
+        tmp_db.save_prices(df, "BAD")
+        result = tmp_db.get_latest_prices("BAD")
+        assert result.empty
+
 
 class TestSaveFundamentals:
     def test_save_fundamentals(self, tmp_db, sample_fundamentals_df):
@@ -95,23 +112,32 @@ class TestSaveFundamentals:
         assert not result.empty
         assert result["market_cap"].iloc[0] == 2500000000000
 
-    def test_dynamic_column_addition(self, tmp_db):
+    def test_extra_columns_stored_as_json(self, tmp_db):
+        """Columns not in the fixed schema go into extra_data JSON."""
         df = pd.DataFrame(
             {
                 "market_cap": [100],
                 "new_metric": [42.0],
+                "another_thing": ["hello"],
             }
         )
         tmp_db.save_fundamentals(df, "TEST")
         with sqlite3.connect(tmp_db.db_path) as conn:
-            cursor = conn.execute("PRAGMA table_info(fundamentals)")
-            columns = {row[1] for row in cursor.fetchall()}
-        assert "new_metric" in columns
+            result = pd.read_sql_query(
+                "SELECT extra_data FROM fundamentals WHERE symbol = 'TEST'", conn
+            )
+        assert not result.empty
+        extra = json.loads(result["extra_data"].iloc[0])
+        assert extra["new_metric"] == 42.0
+        assert extra["another_thing"] == "hello"
 
-    def test_rejects_invalid_column_name(self, tmp_db):
-        df = pd.DataFrame({"market_cap": [100], "bad col": [42.0]})
-        with pytest.raises(ValueError, match="Invalid column name"):
-            tmp_db.save_fundamentals(df, "TEST")
+    def test_idempotent_same_day(self, tmp_db, sample_fundamentals_df):
+        """Running twice on the same day should replace, not duplicate."""
+        tmp_db.save_fundamentals(sample_fundamentals_df, "AAPL")
+        tmp_db.save_fundamentals(sample_fundamentals_df, "AAPL")
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            result = pd.read_sql_query("SELECT * FROM fundamentals WHERE symbol = 'AAPL'", conn)
+        assert len(result) == 1
 
 
 class TestSaveSecFilings:
@@ -129,6 +155,38 @@ class TestSaveSecFilings:
             )
         # Dates should be in YYYY-MM-DD format
         assert len(result["filing_date"].iloc[0]) == 10
+
+    def test_idempotent_rerun(self, tmp_db, sample_filings_df):
+        """Running save_sec_filings twice should not duplicate rows."""
+        tmp_db.save_sec_filings(sample_filings_df, "AAPL")
+        tmp_db.save_sec_filings(sample_filings_df, "AAPL")
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            result = pd.read_sql_query("SELECT * FROM sec_filings WHERE symbol = 'AAPL'", conn)
+        assert len(result) == 3
+
+    def test_extra_columns_stored_as_json(self, tmp_db, sample_filings_df):
+        """Extra columns from SEC API go into extra_data."""
+        tmp_db.save_sec_filings(sample_filings_df, "AAPL")
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            result = pd.read_sql_query(
+                "SELECT extra_data FROM sec_filings WHERE symbol = 'AAPL' LIMIT 1", conn
+            )
+        # sample_filings_df has filing_detail_url and primary_doc which are now known cols,
+        # so extra_data may be null or empty — that's correct
+        assert not result.empty
+
+    def test_rejects_null_accession_number(self, tmp_db):
+        """Rows without accession_number should be dropped."""
+        df = pd.DataFrame({
+            "filing_date": ["2025-01-15"],
+            "report_type": ["10-K"],
+            "accession_number": [None],
+            "report_url": ["https://sec.gov/10k"],
+        })
+        tmp_db.save_sec_filings(df, "AAPL")
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            result = pd.read_sql_query("SELECT * FROM sec_filings WHERE symbol = 'AAPL'", conn)
+        assert result.empty
 
 
 class TestSaveEconomicIndicators:
@@ -180,9 +238,40 @@ class TestUpdateMetadata:
     def test_records_metadata(self, tmp_db):
         tmp_db.update_metadata("prices", "AAPL", 100, "success")
         with sqlite3.connect(tmp_db.db_path) as conn:
-            result = pd.read_sql_query("SELECT * FROM fetch_metadata", conn)
+            result = pd.read_sql_query("SELECT * FROM fetch_log", conn)
         assert len(result) == 1
         assert result["data_type"].iloc[0] == "prices"
         assert result["symbol"].iloc[0] == "AAPL"
-        assert result["rows_fetched"].iloc[0] == 100
+        assert result["record_count"].iloc[0] == 100
         assert result["status"].iloc[0] == "success"
+
+
+class TestBatchQueries:
+    def test_get_latest_prices_batch(self, tmp_db, sample_price_df):
+        tmp_db.save_prices(sample_price_df, "AAPL")
+        tmp_db.save_prices(sample_price_df, "MSFT")
+        result = tmp_db.get_latest_prices_batch(["AAPL", "MSFT"])
+        assert len(result) == 2
+        assert set(result["symbol"]) == {"AAPL", "MSFT"}
+
+    def test_get_latest_prices_batch_empty(self, tmp_db):
+        result = tmp_db.get_latest_prices_batch([])
+        assert result.empty
+
+    def test_get_latest_prices_batch_with_previous(self, tmp_db, sample_price_df):
+        tmp_db.save_prices(sample_price_df, "AAPL")
+        result = tmp_db.get_latest_prices_batch_with_previous(["AAPL"])
+        assert len(result) == 2  # two most recent rows
+
+    def test_get_latest_economic_indicators(self, tmp_db, sample_economic_df):
+        tmp_db.save_economic_indicators(sample_economic_df, "GDP")
+        tmp_db.save_economic_indicators(sample_economic_df, "CPI")
+        result = tmp_db.get_latest_economic_indicators(["GDP"])
+        assert len(result) == 1
+        assert result["series_id"].iloc[0] == "GDP"
+
+    def test_get_latest_economic_indicators_all(self, tmp_db, sample_economic_df):
+        tmp_db.save_economic_indicators(sample_economic_df, "GDP")
+        tmp_db.save_economic_indicators(sample_economic_df, "CPI")
+        result = tmp_db.get_latest_economic_indicators()
+        assert len(result) == 2

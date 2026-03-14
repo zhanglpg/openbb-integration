@@ -73,11 +73,11 @@ class TestDatabaseRoundTrip:
         tmp_db.update_metadata("prices", "AAPL", 5, "success")
 
         with sqlite3.connect(tmp_db.db_path) as conn:
-            result = pd.read_sql_query("SELECT * FROM fetch_metadata", conn)
+            result = pd.read_sql_query("SELECT * FROM fetch_log", conn)
 
         assert len(result) == 1
         assert result["data_type"].iloc[0] == "prices"
-        assert result["rows_fetched"].iloc[0] == 5
+        assert result["record_count"].iloc[0] == 5
 
 
 @pytest.mark.integration
