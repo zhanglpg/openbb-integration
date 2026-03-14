@@ -36,15 +36,15 @@ SEC_FILING_TYPES = ["10-K", "10-Q", "8-K", "DEF 14A"]
 
 # Data refresh intervals (in hours)
 REFRESH_INTERVALS = {
-    "prices": 1,        # Hourly during market hours
-    "fundamentals": 24, # Daily
-    "sec_filings": 6,   # Every 6 hours
-    "economic": 24,     # Daily
+    "prices": 1,  # Hourly during market hours
+    "fundamentals": 24,  # Daily
+    "sec_filings": 6,  # Every 6 hours
+    "economic": 24,  # Daily
 }
 
 # Alert thresholds
 ALERT_THRESHOLDS = {
-    "stock_daily_change": 0.05,      # 5%
-    "etf_daily_change": 0.03,        # 3%
-    "china_exposure_change": 0.04,   # 4%
+    "stock_daily_change": 0.05,  # 5%
+    "etf_daily_change": 0.03,  # 3%
+    "china_exposure_change": 0.04,  # 4%
 }
