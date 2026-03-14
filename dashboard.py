@@ -211,6 +211,10 @@ def main():
                     date = row["date"].iloc[-1]
                     name = friendly_names.get(series_id, series_id)
 
+                    if value is None:
+                        st.metric(name, "N/A", delta=f"As of {date}")
+                        continue
+
                     # Format value
                     if series_id in ["VIXCLS", "DGS10", "T10Y2Y", "FEDFUNDS"]:
                         formatted_value = f"{value:.2f}"
