@@ -8,10 +8,9 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from shared import get_db, render_sidebar_controls
-
 from config import ECONOMIC_INDICATORS
 from economic_dashboard import EconomicDashboard
+from shared import get_db, render_sidebar_controls
 
 
 @st.cache_resource
@@ -133,6 +132,9 @@ def main():
                 value = row["value"].iloc[-1]
                 date = row["date"].iloc[-1]
                 name = friendly_names.get(series_id, series_id)
+                if pd.isna(value):
+                    cols[i].metric(name, "N/A", delta=f"As of {date}")
+                    continue
                 formatted = f"{value:.2f}"
                 if series_id in ("DGS10", "FEDFUNDS"):
                     formatted += "%"

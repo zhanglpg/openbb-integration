@@ -10,9 +10,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from shared import get_db, render_sidebar_controls
-
 from config import WATCHLIST
+from shared import get_db, render_sidebar_controls
 
 # Page config
 st.set_page_config(
@@ -210,6 +209,10 @@ def main():
                     value = row["value"].iloc[-1]
                     date = row["date"].iloc[-1]
                     name = friendly_names.get(series_id, series_id)
+
+                    if pd.isna(value):
+                        st.metric(name, "N/A", delta=f"As of {date}")
+                        continue
 
                     # Format value
                     if series_id in ["VIXCLS", "DGS10", "T10Y2Y", "FEDFUNDS"]:
