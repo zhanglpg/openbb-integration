@@ -8,9 +8,9 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+from shared import get_db, render_sidebar_controls  # must be first: adds src/ to sys.path
 from config import ECONOMIC_INDICATORS
 from economic_dashboard import EconomicDashboard
-from shared import get_db, render_sidebar_controls
 
 
 @st.cache_resource
