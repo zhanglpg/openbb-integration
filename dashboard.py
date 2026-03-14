@@ -4,19 +4,15 @@ Streamlit Portfolio Dashboard
 Real-time portfolio monitoring with OpenBB data pipeline
 """
 
-import sys
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+from shared import get_db, render_sidebar_controls
 
 from config import WATCHLIST
-from database import Database
-from run_pipeline import run_full_pipeline
 
 # Page config
 st.set_page_config(
@@ -31,26 +27,20 @@ PORTFOLIO = {category.title(): symbols for category, symbols in WATCHLIST.items(
 ALL_SYMBOLS = sorted(set(sym for symbols in WATCHLIST.values() for sym in symbols))
 
 
-@st.cache_resource
-def get_db():
-    """Cached database connection (persists across Streamlit reruns)."""
-    return Database()
-
-
 @st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_latest_prices(_db: Database) -> pd.DataFrame:
+def get_latest_prices(_db) -> pd.DataFrame:
     """Get latest prices for all portfolio symbols (single batch query)."""
     return _db.get_latest_prices_batch(ALL_SYMBOLS)
 
 
 @st.cache_data(ttl=300)
-def get_latest_prices_with_change(_db: Database) -> pd.DataFrame:
+def get_latest_prices_with_change(_db) -> pd.DataFrame:
     """Get latest prices with change percent for all symbols."""
     return _db.get_latest_prices_batch_with_previous(ALL_SYMBOLS)
 
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
-def get_price_history(symbol: str, _db: Database, days: int = 90) -> pd.DataFrame:
+def get_price_history(symbol: str, _db, days: int = 90) -> pd.DataFrame:
     """Get price history for a symbol."""
     df = _db.get_latest_prices(symbol, days=days)
     if "date" in df.columns:
@@ -60,14 +50,14 @@ def get_price_history(symbol: str, _db: Database, days: int = 90) -> pd.DataFram
 
 
 @st.cache_data(ttl=3600)
-def get_economic_indicators(_db: Database) -> pd.DataFrame:
+def get_economic_indicators(_db) -> pd.DataFrame:
     """Get latest economic indicators (delegates to Database method)."""
     key_indicators = ["VIXCLS", "DGS10", "T10Y2Y", "FEDFUNDS"]
     return _db.get_latest_economic_indicators(key_indicators)
 
 
 @st.cache_data(ttl=3600)
-def get_sec_filings(symbol: str, _db: Database, limit: int = 10) -> pd.DataFrame:
+def get_sec_filings(symbol: str, _db, limit: int = 10) -> pd.DataFrame:
     """Get latest SEC filings for a symbol."""
     import glob
 
@@ -84,35 +74,12 @@ def get_sec_filings(symbol: str, _db: Database, limit: int = 10) -> pd.DataFrame
     return filings.head(limit)
 
 
-def refresh_data():
-    """Run the data pipeline to fetch latest data."""
-    with st.spinner("Fetching latest data..."):
-        try:
-            run_full_pipeline()
-            st.success("✅ Data refreshed successfully!")
-        except Exception as e:
-            st.error(f"❌ Error refreshing data: {str(e)}")
-
-
 def main():
     st.title("📊 Portfolio Dashboard")
     st.markdown("**Real-time portfolio monitoring** | OpenBB Data Pipeline")
 
-    # Sidebar
-    st.sidebar.header("Controls")
-
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
-        if st.button("🔄 Refresh Data", use_container_width=True):
-            refresh_data()
-            st.rerun()
-
-    with col2:
-        if st.button("🔃 Reset Cache", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
-
-    st.sidebar.divider()
+    # Shared sidebar controls
+    render_sidebar_controls()
 
     # Symbol selector
     selected_symbol = st.sidebar.selectbox("Select Symbol", ALL_SYMBOLS, index=0)
