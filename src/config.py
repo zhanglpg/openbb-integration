@@ -36,7 +36,7 @@ SEC_FILING_TYPES = ["10-K", "10-Q", "8-K", "DEF 14A"]
 
 # Pipeline defaults — referenced by run_pipeline.py, watchlist_fetcher.py, dashboard.py
 PIPELINE_DEFAULTS = {
-    "price_lookback_days": 30,
+    "price_lookback_days": 90,
     "sec_filing_limit": 10,
     "api_call_delay": 0.5,  # seconds between consecutive API calls
     "max_retries": 3,

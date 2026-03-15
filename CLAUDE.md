@@ -56,11 +56,15 @@ pipeline.py / src/run_pipeline.py   ← CLI entry points
     ├── src/economic_dashboard.py    ← FRED / macro indicators (obb.economy.*)
     │
     └── src/database.py              ← SQLite storage (schema v2, upsert-based)
-        └── src/config.py            ← paths, watchlist dict, pipeline defaults
+    │   └── src/config.py            ← paths, watchlist dict, pipeline defaults
+    │
+    └── src/analysis.py              ← pure analysis functions (technicals, risk, macro)
 
 dashboard.py                         ← Streamlit main page (Portfolio)
 pages/2_Economy.py                   ← Streamlit economy page
 shared.py                            ← shared Streamlit helpers (get_db, sidebar)
+
+src/mcp_server.py                    ← MCP server (FastMCP) — 6 data tools + 5 analysis tools
 ```
 
 ### Key patterns

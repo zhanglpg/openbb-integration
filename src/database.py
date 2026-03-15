@@ -418,13 +418,9 @@ class Database:
         # Defensive: if 'value' column is missing, use first numeric column
         if "value" not in df.columns:
             exclude = {"series_id", "fetched_at", "date", "id"}
-            numeric = [
-                c for c in df.select_dtypes(include="number").columns if c not in exclude
-            ]
+            numeric = [c for c in df.select_dtypes(include="number").columns if c not in exclude]
             if numeric:
-                logger.info(
-                    "Column 'value' not found for %s; using '%s'", series_id, numeric[0]
-                )
+                logger.info("Column 'value' not found for %s; using '%s'", series_id, numeric[0])
                 df = df.rename(columns={numeric[0]: "value"})
 
         df["series_id"] = series_id
@@ -530,6 +526,55 @@ class Database:
 
         with sqlite3.connect(self.db_path) as conn:
             return pd.read_sql_query(query, conn, params=params)
+
+    def get_price_history_batch(self, symbols: List[str], days: int = 90) -> pd.DataFrame:
+        """Get price history for multiple symbols — last N rows per symbol."""
+        if not symbols:
+            return pd.DataFrame()
+
+        placeholders = ", ".join(["?"] * len(symbols))
+        query = f"""
+            SELECT symbol, date, open, high, low, close, volume, adj_close
+            FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) as rn
+                FROM price_history
+                WHERE symbol IN ({placeholders})
+            )
+            WHERE rn <= ?
+            ORDER BY symbol, date
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            return pd.read_sql_query(query, conn, params=symbols + [days])
+
+    def get_all_fundamentals(self) -> pd.DataFrame:
+        """Get the latest fundamentals snapshot for all symbols."""
+        query = """
+            SELECT f.*
+            FROM fundamentals f
+            INNER JOIN (
+                SELECT symbol, MAX(snapshot_date) as max_date
+                FROM fundamentals
+                GROUP BY symbol
+            ) latest ON f.symbol = latest.symbol AND f.snapshot_date = latest.max_date
+            ORDER BY f.symbol
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            return pd.read_sql_query(query, conn)
+
+    def get_economic_indicator_history(self, series_id: str, days: int = 365) -> pd.DataFrame:
+        """Get time series for a single FRED series — last N rows."""
+        query = """
+            SELECT series_id, date, value
+            FROM (
+                SELECT *, ROW_NUMBER() OVER (ORDER BY date DESC) as rn
+                FROM economic_indicators
+                WHERE series_id = ?
+            )
+            WHERE rn <= ?
+            ORDER BY date
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            return pd.read_sql_query(query, conn, params=(series_id, days))
 
     def get_all_symbols(self) -> list:
         """Get all symbols in the database."""

@@ -5,6 +5,7 @@ Unit tests mock the database layer; integration tests use a real SQLite DB.
 
 import sqlite3
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -55,8 +56,9 @@ with (
 @pytest.fixture
 def mcp_db(tmp_db):
     """Patch the module-level db and DB_PATH used by mcp_server functions."""
-    with patch.object(mcp_server, "db", tmp_db), patch.object(
-        mcp_server, "DB_PATH", tmp_db.db_path
+    with (
+        patch.object(mcp_server, "db", tmp_db),
+        patch.object(mcp_server, "DB_PATH", tmp_db.db_path),
     ):
         yield tmp_db
 
@@ -382,3 +384,248 @@ class TestMCPIntegration:
         wl = mcp_server.get_watchlist()
         all_from_wl = sorted(set(s for syms in wl.values() for s in syms))
         assert all_from_wl == mcp_server.ALL_SYMBOLS
+
+
+# ===================================================================
+# Unit tests — analyze_price_technicals
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestAnalyzePriceTechnicals:
+    def test_no_data(self, mcp_db):
+        result = mcp_server.analyze_price_technicals("AAPL")
+        assert "error" in result
+
+    def test_returns_technicals(self, mcp_db):
+        dates = [(f"2025-06-{i:02d}", 100.0 + i) for i in range(1, 22)]
+        _seed_prices(mcp_db, "AAPL", dates)
+        result = mcp_server.analyze_price_technicals("AAPL")
+        assert result["symbol"] == "AAPL"
+        assert result["sma_5"] is not None
+        assert result["sma_20"] is not None
+        assert result["total_return_pct"] > 0
+
+    def test_case_insensitive(self, mcp_db):
+        _seed_prices(mcp_db, "AAPL", [("2025-06-01", 150.0)])
+        result = mcp_server.analyze_price_technicals("aapl")
+        assert result["symbol"] == "AAPL"
+
+    def test_days_parameter(self, mcp_db):
+        dates = [(f"2025-06-{i:02d}", 100.0 + i) for i in range(1, 11)]
+        _seed_prices(mcp_db, "AAPL", dates)
+        result = mcp_server.analyze_price_technicals("AAPL", days=5)
+        assert result["latest_close"] is not None
+
+
+# ===================================================================
+# Unit tests — screen_valuations
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestScreenValuations:
+    def test_empty_db(self, mcp_db):
+        result = mcp_server.screen_valuations()
+        assert result == []
+
+    def test_returns_sorted(self, mcp_db):
+        _seed_fundamentals(mcp_db, "AAPL", snapshot_date="2025-06-01")
+        _seed_fundamentals(mcp_db, "GOOGL", snapshot_date="2025-06-01")
+        # Manually set different PE ratios
+        with sqlite3.connect(mcp_db.db_path) as conn:
+            conn.execute("UPDATE fundamentals SET pe_ratio = 20.0 WHERE symbol = 'GOOGL'")
+        result = mcp_server.screen_valuations(sort_by="pe_ratio")
+        assert len(result) >= 2
+        pes = [r["pe_ratio"] for r in result if r["pe_ratio"] is not None]
+        assert pes == sorted(pes)
+
+    def test_has_derived_metrics(self, mcp_db):
+        with sqlite3.connect(mcp_db.db_path) as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO fundamentals
+                   (symbol, snapshot_date, market_cap, pe_ratio, free_cash_flow)
+                   VALUES (?, ?, ?, ?, ?)""",
+                ("AAPL", "2025-06-01", 3e12, 30.0, 100e9),
+            )
+        result = mcp_server.screen_valuations()
+        assert len(result) == 1
+        assert result[0]["fcf_yield"] is not None
+        assert result[0]["earnings_yield"] is not None
+
+
+# ===================================================================
+# Unit tests — get_portfolio_risk_summary
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestGetPortfolioRiskSummary:
+    def test_empty_db(self, mcp_db):
+        result = mcp_server.get_portfolio_risk_summary()
+        assert result["per_symbol"] == []
+
+    def test_with_data(self, mcp_db):
+        for sym in ["AAPL", "MSFT"]:
+            mult = 1 if sym == "AAPL" else 2
+            dates = [(f"2025-06-{i:02d}", 100.0 + i * mult) for i in range(1, 21)]
+            _seed_prices(mcp_db, sym, dates)
+        with patch.object(mcp_server, "ALL_SYMBOLS", ["AAPL", "MSFT"]):
+            result = mcp_server.get_portfolio_risk_summary()
+        assert len(result["per_symbol"]) == 2
+        assert result["portfolio"]["avg_pairwise_correlation"] is not None
+
+
+# ===================================================================
+# Unit tests — get_macro_snapshot
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestGetMacroSnapshot:
+    def test_empty_db(self, mcp_db):
+        result = mcp_server.get_macro_snapshot()
+        assert result["indicators"] == []
+
+    def test_with_data(self, mcp_db):
+        dates = [(f"2024-{m:02d}-01", 5.25 + m * 0.01) for m in range(1, 13)]
+        _seed_economic(mcp_db, "FEDFUNDS", dates)
+        _seed_economic(mcp_db, "T10Y2Y", [(f"2024-{m:02d}-01", -0.3) for m in range(1, 13)])
+        _seed_economic(mcp_db, "VIXCLS", [(f"2024-{m:02d}-01", 18.0) for m in range(1, 13)])
+        result = mcp_server.get_macro_snapshot()
+        assert len(result["indicators"]) >= 1
+        assert result["yield_curve_status"] is not None
+        assert result["vix_regime"] is not None
+
+
+# ===================================================================
+# Unit tests — get_sec_activity_summary
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestGetSecActivitySummary:
+    def test_empty_db(self, mcp_db):
+        result = mcp_server.get_sec_activity_summary()
+        assert result["per_symbol"] == []
+
+    def test_with_data(self, mcp_db):
+        _seed_sec_filings(mcp_db, "AAPL")
+        result = mcp_server.get_sec_activity_summary(days=365)
+        assert len(result["per_symbol"]) >= 1
+
+    def test_inactive_detection(self, mcp_db):
+        """Filings outside the window should mark symbol as inactive."""
+        # Seed filings with old dates (>90 days ago)
+        old_date = (datetime.now() - timedelta(days=200)).strftime("%Y-%m-%d")
+        with sqlite3.connect(mcp_db.db_path) as conn:
+            conn.execute(
+                """INSERT INTO sec_filings
+                   (symbol, filing_date, report_type, accession_number)
+                   VALUES (?, ?, ?, ?)""",
+                ("NVDA", old_date, "10-K", "0001-old-000001"),
+            )
+        with patch.object(mcp_server, "ALL_SYMBOLS", ["NVDA"]):
+            result = mcp_server.get_sec_activity_summary(days=90)
+        assert "NVDA" in result["inactive_symbols"]
+
+
+# ===================================================================
+# Integration tests — analysis tools end-to-end
+# ===================================================================
+
+
+@pytest.mark.integration
+class TestAnalysisToolsIntegration:
+    """End-to-end tests for the 5 analysis MCP tools."""
+
+    def test_technicals_roundtrip(self, mcp_db):
+        """Seed price data → analyze_price_technicals → verify metrics."""
+        dates = [(f"2025-05-{i:02d}", 100.0 + i * 0.5) for i in range(1, 31)]
+        _seed_prices(mcp_db, "NVDA", dates)
+        result = mcp_server.analyze_price_technicals("NVDA", days=30)
+        assert result["symbol"] == "NVDA"
+        assert result["sma_20"] is not None
+        assert result["daily_volatility"] is not None
+        assert result["total_return_pct"] > 0
+        assert result["price_vs_sma20"] in ("above", "below")
+
+    def test_valuation_screen_multiple(self, mcp_db):
+        """Multiple symbols with fundamentals → screen_valuations → sorted."""
+        for sym, pe, mcap, fcf in [
+            ("AAPL", 30.0, 3e12, 100e9),
+            ("MSFT", 35.0, 2.8e12, 70e9),
+            ("GOOGL", 25.0, 2e12, 80e9),
+        ]:
+            with sqlite3.connect(mcp_db.db_path) as conn:
+                conn.execute(
+                    """INSERT OR REPLACE INTO fundamentals
+                       (symbol, snapshot_date, market_cap, pe_ratio, free_cash_flow)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (sym, "2025-06-01", mcap, pe, fcf),
+                )
+        result = mcp_server.screen_valuations(sort_by="pe_ratio")
+        assert len(result) == 3
+        assert result[0]["symbol"] == "GOOGL"  # lowest PE
+        assert result[-1]["symbol"] == "MSFT"  # highest PE
+        assert all(r.get("fcf_yield") is not None for r in result)
+
+    def test_portfolio_risk_cross_symbol(self, mcp_db):
+        """Multiple symbols → get_portfolio_risk_summary → correlation computed."""
+        import numpy as np
+
+        np.random.seed(42)
+        for sym, base in [("AAPL", 150), ("MSFT", 400), ("NVDA", 800)]:
+            prices = base + np.cumsum(np.random.randn(30) * 2)
+            dates = [(f"2025-05-{i:02d}", float(p)) for i, p in zip(range(1, 31), prices)]
+            _seed_prices(mcp_db, sym, dates)
+        with patch.object(mcp_server, "ALL_SYMBOLS", ["AAPL", "MSFT", "NVDA"]):
+            result = mcp_server.get_portfolio_risk_summary()
+        assert len(result["per_symbol"]) == 3
+        assert result["portfolio"]["avg_pairwise_correlation"] is not None
+        assert len(result["most_volatile_3"]) == 3
+        assert len(result["least_volatile_3"]) == 3
+
+    def test_macro_snapshot_with_regimes(self, mcp_db):
+        """Seed FRED data → get_macro_snapshot → regime detection works."""
+        dates = [(f"2024-{m:02d}-01", v) for m, v in zip(range(1, 13), [5.5] * 6 + [5.25] * 6)]
+        _seed_economic(mcp_db, "FEDFUNDS", dates)
+        _seed_economic(mcp_db, "T10Y2Y", [(f"2024-{m:02d}-01", -0.5) for m in range(1, 13)])
+        _seed_economic(mcp_db, "VIXCLS", [(f"2024-{m:02d}-01", 28.0) for m in range(1, 13)])
+        result = mcp_server.get_macro_snapshot()
+        assert result["yield_curve_status"] == "inverted"
+        assert result["vix_regime"] == "high"
+        assert result["rate_direction"] == "stable"
+
+    def test_sec_activity_with_8k(self, mcp_db):
+        """Seed recent 8-K → get_sec_activity_summary → 8-K detected."""
+        recent_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
+        with sqlite3.connect(mcp_db.db_path) as conn:
+            conn.execute(
+                """INSERT INTO sec_filings
+                   (symbol, filing_date, report_type, accession_number, primary_doc_description)
+                   VALUES (?, ?, ?, ?, ?)""",
+                ("AAPL", recent_date, "8-K", "0001-new-8k", "Material Event"),
+            )
+            conn.execute(
+                """INSERT INTO sec_filings
+                   (symbol, filing_date, report_type, accession_number)
+                   VALUES (?, ?, ?, ?)""",
+                ("AAPL", recent_date, "10-Q", "0001-new-10q"),
+            )
+        with patch.object(mcp_server, "ALL_SYMBOLS", ["AAPL"]):
+            result = mcp_server.get_sec_activity_summary(days=30)
+        assert len(result["per_symbol"]) == 1
+        assert result["per_symbol"][0]["total_filings"] == 2
+        assert len(result["recent_8k_activity"]) == 1
+        assert result["recent_8k_activity"][0]["description"] == "Material Event"
+
+    def test_analysis_tools_consistent_with_data_tools(self, mcp_db):
+        """analyze_price_technicals should use the same data as get_price_history."""
+        dates = [(f"2025-06-{i:02d}", 100.0 + i) for i in range(1, 11)]
+        _seed_prices(mcp_db, "AAPL", dates)
+        history = mcp_server.get_price_history("AAPL", days=10)
+        technicals = mcp_server.analyze_price_technicals("AAPL", days=10)
+        # Latest close should match
+        latest_from_history = max(history, key=lambda r: r["date"])["close"]
+        assert technicals["latest_close"] == latest_from_history

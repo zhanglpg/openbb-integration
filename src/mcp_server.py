@@ -4,12 +4,20 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import pandas as pd
 from fastmcp import FastMCP
 
 # Ensure src/ is on the path so we can import config and database
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import DB_PATH, WATCHLIST
+from analysis import (
+    compute_macro_snapshot,
+    compute_portfolio_risk,
+    compute_price_technicals,
+    compute_sec_activity,
+    compute_valuation_screen,
+)
+from config import DB_PATH, ECONOMIC_INDICATORS, WATCHLIST
 from database import Database
 
 mcp = FastMCP("openclaw-finance")
@@ -136,6 +144,70 @@ def get_economic_indicators(series_ids: list[str] | None = None) -> list[dict]:
 def get_watchlist() -> dict:
     """Current watchlist configuration (categories → symbols)."""
     return WATCHLIST
+
+
+# ------------------------------------------------------------------
+# Analysis tools
+# ------------------------------------------------------------------
+
+
+@mcp.tool()
+def analyze_price_technicals(symbol: str, days: int = 90) -> dict:
+    """Compute technical indicators for a symbol: SMA(5/10/20), volatility,
+    max drawdown, volume trends, and total return over the given period."""
+    df = db.get_latest_prices(symbol.upper(), days)
+    if df.empty:
+        return {"symbol": symbol.upper(), "error": "no price data"}
+    df = df.drop(columns=["id", "fetched_at"], errors="ignore")
+    return compute_price_technicals(df, symbol.upper())
+
+
+@mcp.tool()
+def screen_valuations(sort_by: str = "pe_ratio") -> list[dict]:
+    """Screen all watchlist symbols by valuation metrics (PE, PB, FCF yield,
+    earnings yield, etc.). Returns a sorted list — useful for finding
+    undervalued or overvalued stocks."""
+    df = db.get_all_fundamentals()
+    return compute_valuation_screen(df, sort_by)
+
+
+@mcp.tool()
+def get_portfolio_risk_summary() -> dict:
+    """Portfolio-level risk analysis: per-symbol volatility and Sharpe ratio,
+    average pairwise correlation, sector concentration, and the 3 most/least
+    volatile holdings."""
+    df = db.get_price_history_batch(ALL_SYMBOLS, days=90)
+    return compute_portfolio_risk(df, WATCHLIST)
+
+
+@mcp.tool()
+def get_macro_snapshot() -> dict:
+    """Macro environment summary: latest values and 1m/3m/6m/1y changes for
+    all tracked FRED indicators, plus yield curve status, VIX regime, and
+    Fed Funds rate direction."""
+    histories = {}
+    for series_id in ECONOMIC_INDICATORS:
+        histories[series_id] = db.get_economic_indicator_history(series_id, days=365)
+    return compute_macro_snapshot(histories)
+
+
+@mcp.tool()
+def get_sec_activity_summary(days: int = 90) -> dict:
+    """SEC filing activity: per-symbol filing counts and types, recent 8-K
+    events, and symbols with no filings in the lookback window."""
+    # Fetch all filings for watchlist symbols
+    import sqlite3 as _sqlite3
+
+    placeholders = ", ".join(["?"] * len(ALL_SYMBOLS))
+    query = f"""
+        SELECT symbol, filing_date, report_type, primary_doc_description
+        FROM sec_filings
+        WHERE symbol IN ({placeholders})
+        ORDER BY filing_date DESC
+    """
+    with _sqlite3.connect(DB_PATH) as conn:
+        df = pd.read_sql_query(query, conn, params=ALL_SYMBOLS)
+    return compute_sec_activity(df, days)
 
 
 # ------------------------------------------------------------------
