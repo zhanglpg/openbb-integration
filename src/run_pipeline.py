@@ -7,10 +7,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import argparse
+import sqlite3
 from datetime import datetime
 
+import pandas as pd
+
+from analysis import (
+    compute_macro_snapshot,
+    compute_portfolio_risk,
+    compute_price_technicals,
+    compute_sec_activity,
+    compute_valuation_screen,
+)
+from config import DB_PATH, ECONOMIC_INDICATORS, REPORTS_DIR, WATCHLIST
 from database import Database
 from economic_dashboard import EconomicDashboard
+from report import format_report_markdown, generate_daily_report
 from sec_parser import SECParser
 from watchlist_fetcher import WatchlistFetcher
 
@@ -153,11 +165,102 @@ def run_quick_test():
     logger.info("=" * 70)
 
 
+def run_daily_report():
+    """Generate a daily report from existing DB data."""
+    logger.info("=" * 70)
+    logger.info("Daily Report Generation")
+    logger.info("=" * 70)
+
+    db = Database()
+    all_symbols = sorted(set(s for symbols in WATCHLIST.values() for s in symbols))
+
+    # 1. Portfolio overview
+    overview_df = db.get_latest_prices_batch_with_previous(all_symbols)
+    symbol_sector = {}
+    for category, symbols in WATCHLIST.items():
+        for s in symbols:
+            if s not in symbol_sector:
+                symbol_sector[s] = category
+
+    portfolio_overview = []
+    if not overview_df.empty:
+        for symbol in overview_df["symbol"].unique():
+            rows = overview_df[overview_df["symbol"] == symbol].sort_values("date", ascending=False)
+            latest = rows.iloc[0]
+            price = latest["close"]
+            change_pct = None
+            if len(rows) >= 2:
+                prev_close = rows.iloc[1]["close"]
+                if prev_close and prev_close != 0:
+                    change_pct = round((price - prev_close) / prev_close * 100, 2)
+            portfolio_overview.append(
+                {
+                    "symbol": symbol,
+                    "sector": symbol_sector.get(symbol, "unknown"),
+                    "price": price,
+                    "change_pct": change_pct,
+                }
+            )
+
+    # 2. Technicals
+    technicals = {}
+    for sym in all_symbols:
+        df = db.get_latest_prices(sym, 90)
+        if not df.empty:
+            df = df.drop(columns=["id", "fetched_at"], errors="ignore")
+            technicals[sym] = compute_price_technicals(df, sym)
+
+    # 3. Valuations
+    fund_df = db.get_all_fundamentals()
+    valuations = compute_valuation_screen(fund_df)
+
+    # 4. Risk
+    prices_df = db.get_price_history_batch(all_symbols, days=90)
+    risk_summary = compute_portfolio_risk(prices_df, WATCHLIST)
+
+    # 5. Macro
+    histories = {}
+    for series_id in ECONOMIC_INDICATORS:
+        histories[series_id] = db.get_economic_indicator_history(series_id, days=365)
+    macro_snapshot = compute_macro_snapshot(histories)
+
+    # 6. SEC activity
+    placeholders = ", ".join(["?"] * len(all_symbols))
+    query = f"""
+        SELECT symbol, filing_date, report_type, primary_doc_description
+        FROM sec_filings
+        WHERE symbol IN ({placeholders})
+        ORDER BY filing_date DESC
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        filings_df = pd.read_sql_query(query, conn, params=all_symbols)
+    sec_activity = compute_sec_activity(filings_df, days=90)
+
+    # Generate report
+    report_date = datetime.now().strftime("%Y-%m-%d")
+    report = generate_daily_report(
+        portfolio_overview=portfolio_overview,
+        technicals=technicals,
+        valuations=valuations,
+        risk_summary=risk_summary,
+        macro_snapshot=macro_snapshot,
+        sec_activity=sec_activity,
+        report_date=report_date,
+    )
+    md = format_report_markdown(report)
+
+    # Write to file
+    report_path = REPORTS_DIR / f"{report_date}.md"
+    report_path.write_text(md, encoding="utf-8")
+    logger.info("Report written to: %s", report_path)
+    logger.info("Report date: %s", report_date)
+
+
 def main():
     parser = argparse.ArgumentParser(description="OpenBB Financial Data Pipeline")
     parser.add_argument(
         "mode",
-        choices=["full", "test", "prices", "fundamentals", "sec", "economic"],
+        choices=["full", "test", "prices", "fundamentals", "sec", "economic", "report", "daily"],
         default="test",
         nargs="?",
         help="Pipeline mode to run",
@@ -192,6 +295,11 @@ def main():
         logger.info("Running economic indicators update...")
         dashboard = EconomicDashboard()
         dashboard.update_all_indicators()
+    elif args.mode == "report":
+        run_daily_report()
+    elif args.mode == "daily":
+        run_full_pipeline()
+        run_daily_report()
 
 
 if __name__ == "__main__":

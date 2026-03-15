@@ -7,10 +7,12 @@ PROJECT_ROOT = Path(__file__).parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 CACHE_DIR = DATA_DIR / "cache"
 DB_PATH = DATA_DIR / "openbb_data.db"
+REPORTS_DIR = DATA_DIR / "reports"
 
 # Ensure directories exist
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Watchlist configuration
 WATCHLIST = {
