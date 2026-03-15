@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "openclaw-finance": {
+      "command": "/Users/lipingzhang/.openbb_platform/.venv/bin/python",
+      "args": ["src/mcp_server.py"]
+    }
+  }
+}
