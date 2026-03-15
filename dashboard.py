@@ -140,7 +140,7 @@ def main():
             # Display portfolio table
             st.dataframe(
                 display_df.style.map(color_change, subset=["Change"]),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
         else:

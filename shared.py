@@ -24,7 +24,7 @@ def render_sidebar_controls():
 
     col1, col2 = st.sidebar.columns(2)
     with col1:
-        if st.button("🔄 Refresh Data", use_container_width=True):
+        if st.button("🔄 Refresh Data", width="stretch"):
             with st.spinner("Fetching latest data..."):
                 try:
                     run_full_pipeline()
@@ -34,7 +34,7 @@ def render_sidebar_controls():
             st.rerun()
 
     with col2:
-        if st.button("🔃 Reset Cache", use_container_width=True):
+        if st.button("🔃 Reset Cache", width="stretch"):
             st.cache_data.clear()
             st.rerun()
 
