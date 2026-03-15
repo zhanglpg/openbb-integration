@@ -54,9 +54,7 @@ def _normalize_dataframe(df: pd.DataFrame, series_id: str = "") -> pd.DataFrame:
                 break
         if not renamed:
             exclude = {"series_id", "fetched_at", "date"}
-            numeric = [
-                c for c in df.select_dtypes(include="number").columns if c not in exclude
-            ]
+            numeric = [c for c in df.select_dtypes(include="number").columns if c not in exclude]
             if numeric:
                 df = df.rename(columns={numeric[0]: "value"})
             else:

@@ -42,12 +42,18 @@ class DataFetcher:
             logger.error("Error fetching prices for %s: %s", symbol, e)
             return pd.DataFrame()
 
-    def fetch_income_statement(self, symbol: str, provider: str = "yfinance") -> pd.DataFrame:
-        """Fetch income statement."""
+    def fetch_income_statement(
+        self, symbol: str, provider: str = "yfinance", period: str = "annual"
+    ) -> pd.DataFrame:
+        """Fetch income statement.
+
+        Args:
+            period: 'annual' or 'quarter'.
+        """
         try:
 
             def _call():
-                return obb.equity.fundamental.income(symbol, provider=provider)
+                return obb.equity.fundamental.income(symbol, provider=provider, period=period)
 
             result = retry_fetch(_call, description=f"income for {symbol}")
             if hasattr(result, "to_dataframe"):
@@ -57,12 +63,18 @@ class DataFetcher:
             logger.error("Error fetching income for %s: %s", symbol, e)
             return pd.DataFrame()
 
-    def fetch_balance_sheet(self, symbol: str, provider: str = "yfinance") -> pd.DataFrame:
-        """Fetch balance sheet."""
+    def fetch_balance_sheet(
+        self, symbol: str, provider: str = "yfinance", period: str = "annual"
+    ) -> pd.DataFrame:
+        """Fetch balance sheet.
+
+        Args:
+            period: 'annual' or 'quarter'.
+        """
         try:
 
             def _call():
-                return obb.equity.fundamental.balance(symbol, provider=provider)
+                return obb.equity.fundamental.balance(symbol, provider=provider, period=period)
 
             result = retry_fetch(_call, description=f"balance for {symbol}")
             if hasattr(result, "to_dataframe"):
@@ -72,12 +84,18 @@ class DataFetcher:
             logger.error("Error fetching balance for %s: %s", symbol, e)
             return pd.DataFrame()
 
-    def fetch_cash_flow(self, symbol: str, provider: str = "yfinance") -> pd.DataFrame:
-        """Fetch cash flow statement."""
+    def fetch_cash_flow(
+        self, symbol: str, provider: str = "yfinance", period: str = "annual"
+    ) -> pd.DataFrame:
+        """Fetch cash flow statement.
+
+        Args:
+            period: 'annual' or 'quarter'.
+        """
         try:
 
             def _call():
-                return obb.equity.fundamental.cash(symbol, provider=provider)
+                return obb.equity.fundamental.cash(symbol, provider=provider, period=period)
 
             result = retry_fetch(_call, description=f"cash flow for {symbol}")
             if hasattr(result, "to_dataframe"):

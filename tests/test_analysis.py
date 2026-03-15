@@ -13,11 +13,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from analysis import (  # noqa: I001, E402
     compute_bollinger_bands,
+    compute_financial_ratios,
     compute_macd,
     compute_macro_snapshot,
     compute_portfolio_risk,
     compute_price_technicals,
     compute_sec_activity,
+    compute_ttm,
     compute_valuation_screen,
     resample_ohlcv,
 )
@@ -618,3 +620,202 @@ class TestResampleEdgeCases:
         df = pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
         result = resample_ohlcv(df, "W")
         assert result.empty
+
+
+# ===================================================================
+# compute_financial_ratios
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestComputeFinancialRatios:
+    def _income(self):
+        return pd.DataFrame(
+            {
+                "period_ending": ["2023-09-30", "2024-09-30"],
+                "total_revenue": [400e9, 420e9],
+                "gross_profit": [180e9, 195e9],
+                "operating_income": [120e9, 130e9],
+                "net_income": [100e9, 110e9],
+            }
+        )
+
+    def _balance(self):
+        return pd.DataFrame(
+            {
+                "period_ending": ["2023-09-30", "2024-09-30"],
+                "total_assets": [350e9, 370e9],
+                "total_liabilities_net_minority_interest": [280e9, 290e9],
+                "total_equity_non_controlling_interests": [70e9, 80e9],
+                "total_debt": [110e9, 100e9],
+                "total_current_assets": [140e9, 150e9],
+                "current_liabilities": [130e9, 140e9],
+            }
+        )
+
+    def _cashflow(self):
+        return pd.DataFrame(
+            {
+                "period_ending": ["2023-09-30", "2024-09-30"],
+                "operating_cash_flow": [110e9, 120e9],
+                "free_cash_flow": [90e9, 100e9],
+                "capital_expenditure": [-20e9, -20e9],
+            }
+        )
+
+    def test_output_columns(self):
+        result = compute_financial_ratios(self._income(), self._balance(), self._cashflow())
+        expected = {
+            "period_ending",
+            "gross_margin",
+            "operating_margin",
+            "net_margin",
+            "roe",
+            "roa",
+            "debt_to_equity",
+            "current_ratio",
+            "fcf_margin",
+        }
+        assert expected == set(result.columns)
+
+    def test_gross_margin(self):
+        result = compute_financial_ratios(self._income(), self._balance(), self._cashflow())
+        # 180/400 = 0.45
+        assert result["gross_margin"].iloc[0] == pytest.approx(0.45, abs=0.01)
+
+    def test_net_margin(self):
+        result = compute_financial_ratios(self._income(), self._balance(), self._cashflow())
+        # 100/400 = 0.25
+        assert result["net_margin"].iloc[0] == pytest.approx(0.25, abs=0.01)
+
+    def test_roe(self):
+        result = compute_financial_ratios(self._income(), self._balance(), self._cashflow())
+        # 100/70 ≈ 1.4286
+        assert result["roe"].iloc[0] == pytest.approx(1.4286, abs=0.01)
+
+    def test_current_ratio(self):
+        result = compute_financial_ratios(self._income(), self._balance(), self._cashflow())
+        # 140/130 ≈ 1.077
+        assert result["current_ratio"].iloc[0] == pytest.approx(1.077, abs=0.01)
+
+    def test_fcf_margin(self):
+        result = compute_financial_ratios(self._income(), self._balance(), self._cashflow())
+        # 90/400 = 0.225
+        assert result["fcf_margin"].iloc[0] == pytest.approx(0.225, abs=0.01)
+
+    def test_missing_columns_no_crash(self):
+        """Missing columns produce NaN ratios, not errors."""
+        income = pd.DataFrame({"period_ending": ["2024-09-30"], "total_revenue": [100e9]})
+        balance = pd.DataFrame({"period_ending": ["2024-09-30"], "total_assets": [50e9]})
+        cashflow = pd.DataFrame({"period_ending": ["2024-09-30"]})
+        result = compute_financial_ratios(income, balance, cashflow)
+        assert len(result) == 1
+        assert pd.isna(result["gross_margin"].iloc[0])  # no gross_profit column
+        assert pd.isna(result["fcf_margin"].iloc[0])  # no FCF column
+
+    def test_empty_dataframes(self):
+        """Empty inputs → empty output."""
+        result = compute_financial_ratios(pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+        assert result.empty
+
+    def test_none_dataframes(self):
+        """None inputs → empty output."""
+        result = compute_financial_ratios(None, None, None)
+        assert result.empty
+
+    def test_division_by_zero(self):
+        """Zero revenue/equity → NaN, not crash."""
+        income = pd.DataFrame(
+            {"period_ending": ["2024-09-30"], "total_revenue": [0], "net_income": [100]}
+        )
+        balance = pd.DataFrame(
+            {
+                "period_ending": ["2024-09-30"],
+                "total_equity_non_controlling_interests": [0],
+                "total_assets": [100],
+            }
+        )
+        result = compute_financial_ratios(income, balance, pd.DataFrame())
+        assert pd.isna(result["net_margin"].iloc[0])
+        assert pd.isna(result["roe"].iloc[0])
+
+    def test_period_count(self):
+        """Output should have one row per period."""
+        result = compute_financial_ratios(self._income(), self._balance(), self._cashflow())
+        assert len(result) == 2
+
+
+# ===================================================================
+# compute_ttm
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestComputeTtm:
+    def _quarterly(self, n=8):
+        """Build n quarters of fake income data."""
+        dates = pd.date_range("2023-03-31", periods=n, freq="QE")
+        return pd.DataFrame(
+            {
+                "period_ending": dates.strftime("%Y-%m-%d"),
+                "total_revenue": [100e9 + i * 5e9 for i in range(n)],
+                "net_income": [20e9 + i * 1e9 for i in range(n)],
+            }
+        )
+
+    def test_output_length(self):
+        """8 quarters → 5 TTM rows (first 3 quarters have < 4 trailing)."""
+        result = compute_ttm(self._quarterly(8))
+        assert len(result) == 5  # rows 3..7
+
+    def test_sum_correct(self):
+        """TTM row sums the 4 most recent quarters."""
+        df = self._quarterly(4)
+        result = compute_ttm(df)
+        assert len(result) == 1
+        # Sum of 4 quarters: 100 + 105 + 110 + 115 = 430 (in billions)
+        expected_rev = sum(100e9 + i * 5e9 for i in range(4))
+        assert result["total_revenue"].iloc[0] == pytest.approx(expected_rev)
+
+    def test_period_ending_is_latest_quarter(self):
+        """TTM period_ending should be the last quarter in the window."""
+        df = self._quarterly(5)
+        result = compute_ttm(df)
+        # Last TTM row should have period_ending = 5th quarter
+        last_q = pd.to_datetime(df["period_ending"].iloc[-1])
+        assert result["period_ending"].iloc[-1] == last_q
+
+    def test_fewer_than_4_quarters_returns_empty(self):
+        """Fewer than 4 quarters → empty result."""
+        df = self._quarterly(3)
+        result = compute_ttm(df)
+        assert result.empty
+
+    def test_empty_input(self):
+        result = compute_ttm(pd.DataFrame())
+        assert result.empty
+
+    def test_none_input(self):
+        result = compute_ttm(None)
+        assert result.empty
+
+    def test_custom_sum_cols(self):
+        """Only specified columns are summed."""
+        df = self._quarterly(4)
+        result = compute_ttm(df, sum_cols=["total_revenue"])
+        assert "total_revenue" in result.columns
+        assert "net_income" not in result.columns
+
+    def test_rolling_window(self):
+        """Each TTM row slides the 4-quarter window forward by 1."""
+        df = self._quarterly(6)
+        result = compute_ttm(df)
+        assert len(result) == 3  # rows 3, 4, 5
+        # Revenue per quarter: 100, 105, 110, 115, 120, 125
+        # TTM[0] = 100+105+110+115 = 430
+        # TTM[1] = 105+110+115+120 = 450
+        # TTM[2] = 110+115+120+125 = 470
+        revs = result["total_revenue"].tolist()
+        assert revs[0] == pytest.approx(430e9)
+        assert revs[1] == pytest.approx(450e9)
+        assert revs[2] == pytest.approx(470e9)

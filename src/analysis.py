@@ -86,6 +86,51 @@ def compute_price_technicals(df: pd.DataFrame, symbol: str) -> dict:
     }
 
 
+def compute_ttm(quarterly_df: pd.DataFrame, sum_cols: list[str] | None = None) -> pd.DataFrame:
+    """Compute trailing twelve months (TTM) from quarterly data.
+
+    For each quarter, sums the most recent 4 quarters of flow-statement
+    columns (revenue, income, cash flow, etc.).  The result represents
+    annual figures as-of each quarter end.
+
+    Args:
+        quarterly_df: DataFrame with ``period_ending`` and numeric columns,
+            sorted by period_ending ascending.  Must have at least 4 rows.
+        sum_cols: Columns to sum over 4-quarter windows.  If *None*, all
+            numeric columns are summed.
+
+    Returns:
+        DataFrame with same columns, each row being a 4-quarter trailing sum.
+        Rows with fewer than 4 trailing quarters are dropped.
+    """
+    if quarterly_df is None or quarterly_df.empty:
+        return pd.DataFrame()
+
+    df = quarterly_df.copy()
+    if "period_ending" not in df.columns:
+        return pd.DataFrame()
+
+    df["period_ending"] = pd.to_datetime(df["period_ending"])
+    df = df.sort_values("period_ending").reset_index(drop=True)
+
+    if len(df) < 4:
+        return pd.DataFrame()
+
+    if sum_cols is None:
+        sum_cols = df.select_dtypes(include="number").columns.tolist()
+
+    rows = []
+    for i in range(3, len(df)):
+        window = df.iloc[i - 3 : i + 1]
+        row = {"period_ending": df["period_ending"].iloc[i]}
+        for col in sum_cols:
+            if col in df.columns:
+                row[col] = window[col].sum()
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
 def compute_bollinger_bands(
     df: pd.DataFrame, window: int = 20, num_std: float = 2.0
 ) -> pd.DataFrame:
@@ -159,6 +204,84 @@ def resample_ohlcv(df: pd.DataFrame, freq: str = "W") -> pd.DataFrame:
         .dropna()
     )
     return resampled.reset_index()
+
+
+def compute_financial_ratios(
+    income_df: pd.DataFrame,
+    balance_df: pd.DataFrame,
+    cashflow_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Compute financial ratios from income, balance sheet, and cash flow data.
+
+    Args:
+        income_df: Income statement with period_ending, total_revenue, gross_profit,
+            operating_income, net_income columns.
+        balance_df: Balance sheet with period_ending, total_assets,
+            total_liabilities_net_minority_interest,
+            total_equity_non_controlling_interests, total_debt,
+            total_current_assets, current_liabilities columns.
+        cashflow_df: Cash flow with period_ending, free_cash_flow columns.
+
+    Returns:
+        DataFrame indexed by period_ending with ratio columns.
+        Missing source columns produce NaN ratios.
+    """
+
+    def _safe_div(num, den):
+        """Element-wise division, returning NaN for zero/missing denominators."""
+        return num / den.replace(0, np.nan)
+
+    def _col(df, name):
+        """Get column if it exists, else NaN Series aligned to df index."""
+        if name in df.columns:
+            return df[name].astype(float)
+        return pd.Series(np.nan, index=df.index)
+
+    # Align all three statements by period_ending
+    dfs = []
+    for df, prefix in [(income_df, "inc"), (balance_df, "bal"), (cashflow_df, "cf")]:
+        if df is None or df.empty or "period_ending" not in df.columns:
+            continue
+        d = df.copy()
+        d["period_ending"] = pd.to_datetime(d["period_ending"])
+        d = d.set_index("period_ending")
+        d = d.add_prefix(f"{prefix}_")
+        dfs.append(d)
+
+    if not dfs:
+        return pd.DataFrame()
+
+    merged = dfs[0]
+    for d in dfs[1:]:
+        merged = merged.join(d, how="outer")
+    merged = merged.sort_index()
+
+    result = pd.DataFrame(index=merged.index)
+
+    # Profitability margins
+    rev = _col(merged, "inc_total_revenue")
+    result["gross_margin"] = _safe_div(_col(merged, "inc_gross_profit"), rev)
+    result["operating_margin"] = _safe_div(_col(merged, "inc_operating_income"), rev)
+    result["net_margin"] = _safe_div(_col(merged, "inc_net_income"), rev)
+
+    # Returns
+    equity = _col(merged, "bal_total_equity_non_controlling_interests")
+    assets = _col(merged, "bal_total_assets")
+    net_inc = _col(merged, "inc_net_income")
+    result["roe"] = _safe_div(net_inc, equity)
+    result["roa"] = _safe_div(net_inc, assets)
+
+    # Leverage
+    result["debt_to_equity"] = _safe_div(_col(merged, "bal_total_debt"), equity)
+    result["current_ratio"] = _safe_div(
+        _col(merged, "bal_total_current_assets"),
+        _col(merged, "bal_current_liabilities"),
+    )
+
+    # Cash flow
+    result["fcf_margin"] = _safe_div(_col(merged, "cf_free_cash_flow"), rev)
+
+    return result.round(4).reset_index()
 
 
 def compute_valuation_screen(

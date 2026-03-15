@@ -54,11 +54,13 @@ class TestNormalizeDataframe:
 
     def test_series_id_takes_priority_over_close(self):
         """When both the series column and 'close' exist, prefer series_id."""
-        df = pd.DataFrame({
-            "date": ["2024-01-01"],
-            "DGS10": [4.25],
-            "close": [100.0],
-        })
+        df = pd.DataFrame(
+            {
+                "date": ["2024-01-01"],
+                "DGS10": [4.25],
+                "close": [100.0],
+            }
+        )
         result = _normalize_dataframe(df, series_id="DGS10")
         assert result["value"].iloc[0] == 4.25
 
@@ -101,10 +103,12 @@ class TestEconomicDashboard:
 
     def test_fetch_fred_series_symbol_column(self):
         """Regression: FRED returns value in a column named after the series."""
-        df = pd.DataFrame({
-            "date": pd.date_range("2024-01-01", periods=3, freq="MS"),
-            "VIXCLS": [18.5, 19.0, 17.8],
-        })
+        df = pd.DataFrame(
+            {
+                "date": pd.date_range("2024-01-01", periods=3, freq="MS"),
+                "VIXCLS": [18.5, 19.0, 17.8],
+            }
+        )
         self.mock_obb.economy.fred_series.return_value = self._make_result(df)
         result = self.dashboard.fetch_fred_series("VIXCLS")
         assert result is not None
@@ -194,10 +198,12 @@ class TestEconomicDashboard:
         """Regression: FRED data with symbol-named column flows through
         fetch → normalize → save → read and returns non-NULL values."""
         # Simulate FRED returning data with the series symbol as column name
-        fred_df = pd.DataFrame({
-            "date": pd.date_range("2024-01-01", periods=5, freq="MS"),
-            "VIXCLS": [18.5, 19.0, 17.8, 20.1, 16.3],
-        })
+        fred_df = pd.DataFrame(
+            {
+                "date": pd.date_range("2024-01-01", periods=5, freq="MS"),
+                "VIXCLS": [18.5, 19.0, 17.8, 20.1, 16.3],
+            }
+        )
         self.mock_obb.economy.fred_series.return_value = self._make_result(fred_df)
 
         # Step 1: Fetch (normalizes columns internally)
@@ -219,10 +225,12 @@ class TestEconomicDashboard:
     def test_partial_series_in_db(self):
         """Dashboard handles DB having data for some series but not others."""
         # Save data for only 2 of the 4 key indicators
-        df = pd.DataFrame({
-            "date": pd.date_range("2024-01-01", periods=3, freq="MS"),
-            "value": [4.25, 4.30, 4.35],
-        })
+        df = pd.DataFrame(
+            {
+                "date": pd.date_range("2024-01-01", periods=3, freq="MS"),
+                "value": [4.25, 4.30, 4.35],
+            }
+        )
         self.dashboard.db.save_economic_indicators(df, "DGS10")
         self.dashboard.db.save_economic_indicators(df, "FEDFUNDS")
 

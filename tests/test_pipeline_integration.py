@@ -1,6 +1,5 @@
 """Integration tests for pipeline orchestration."""
 
-import sqlite3
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -169,9 +168,7 @@ class TestPipelineDbState:
                     f"{list(indicators['series_id']) if not indicators.empty else '(empty)'}"
                 )
                 for _, row in indicators.iterrows():
-                    assert pd.notna(row["value"]), (
-                        f"Series {row['series_id']} has NULL value"
-                    )
+                    assert pd.notna(row["value"]), f"Series {row['series_id']} has NULL value"
 
                 # Spot-check a specific value (VIXCLS latest = 17.8)
                 vix = indicators[indicators["series_id"] == "VIXCLS"]

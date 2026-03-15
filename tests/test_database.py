@@ -338,14 +338,17 @@ class TestSaveEconomicIndicators:
 
     def test_save_with_symbol_column_name(self, tmp_db):
         """Regression: FRED data has value column named after the series symbol."""
-        df = pd.DataFrame({
-            "date": ["2024-01-01", "2024-02-01"],
-            "VIXCLS": [18.5, 19.0],
-        })
+        df = pd.DataFrame(
+            {
+                "date": ["2024-01-01", "2024-02-01"],
+                "VIXCLS": [18.5, 19.0],
+            }
+        )
         tmp_db.save_economic_indicators(df, "VIXCLS")
         with sqlite3.connect(tmp_db.db_path) as conn:
             result = pd.read_sql_query(
-                "SELECT date, value FROM economic_indicators WHERE series_id = 'VIXCLS' ORDER BY date",
+                "SELECT date, value FROM economic_indicators"
+                " WHERE series_id = 'VIXCLS' ORDER BY date",
                 conn,
             )
         assert len(result) == 2
@@ -520,9 +523,7 @@ class TestGetPriceHistoryByDate:
 
     def test_inclusive_boundaries(self, tmp_db):
         """Start and end dates are inclusive."""
-        self._insert_prices(
-            tmp_db, "AAPL", ["2025-01-01", "2025-01-02", "2025-01-03"]
-        )
+        self._insert_prices(tmp_db, "AAPL", ["2025-01-01", "2025-01-02", "2025-01-03"])
         result = tmp_db.get_price_history_by_date("AAPL", "2025-01-01", "2025-01-01")
         assert len(result) == 1
         assert result["date"].iloc[0] == "2025-01-01"

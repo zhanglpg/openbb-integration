@@ -57,12 +57,15 @@ def _mock_streamlit():
     mock_sortables = MagicMock()
     mock_sortables.sort_items = MagicMock(side_effect=lambda items, **kw: items)
 
-    with patch.dict(sys.modules, {
-        "streamlit": mock_st,
-        "streamlit.components": MagicMock(),
-        "streamlit.components.v1": MagicMock(),
-        "streamlit_sortables": mock_sortables,
-    }):
+    with patch.dict(
+        sys.modules,
+        {
+            "streamlit": mock_st,
+            "streamlit.components": MagicMock(),
+            "streamlit.components.v1": MagicMock(),
+            "streamlit_sortables": mock_sortables,
+        },
+    ):
         yield mock_st
 
 
