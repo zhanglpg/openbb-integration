@@ -8,6 +8,9 @@ pyarrow>=23.0.0
 # Dashboard
 streamlit>=1.30.0
 
+# MCP server
+fastmcp>=2.0.0
+
 # Optional - for enhanced functionality
 # python-dotenv  # Environment variable management
 # sqlalchemy     # Database ORM (if needed)
