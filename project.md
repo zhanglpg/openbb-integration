@@ -108,15 +108,14 @@ _None — Phase 2 complete!_
 - [x] Phase 2 Sprint 3 complete — SQLite storage ✅
 - [x] Phase 2 Sprint 4 complete — FRED integration ✅
 - [x] Phase 2 Sprint 5 complete — Streamlit dashboard ✅ 2026-03-14T16:30
-- [ ] finance: Add more symbols to watchlist (expand from 10 to 50+)
-- [ ] finance: Build scheduled refresh (cron job for daily updates)
-- [ ] main: Phase 3 kickoff — MCP server setup
+- [x] finance: Scheduled refresh (cron job) configured ✅
+- [ ] main: Phase 3 kickoff — MCP server setup (optional)
 
 ## Deliverables
 - [x] Phase 1: Working SDK setup with test queries ✅
-- [x] Phase 2: Watchlist data pipeline + SEC parser + SQLite storage + Dashboard ✅
-- [ ] Phase 3: MCP server + AI research agent
-- [ ] Phase 4 (optional): `openbb-china` extension
+- [x] Phase 2: Watchlist data pipeline + SEC parser + SQLite storage + Dashboard + Cron ✅
+- [ ] Phase 3: MCP server + AI research agent (optional)
+- [ ] Phase 4: `openbb-china` extension (optional)
 
 ## File Structure
 ```
