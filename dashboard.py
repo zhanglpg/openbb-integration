@@ -4,11 +4,13 @@ Streamlit Portfolio Dashboard
 Real-time portfolio monitoring with OpenBB data pipeline
 """
 
+import json
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from streamlit_sortables import sort_items
 
 from shared import get_db, render_sidebar_controls  # must be first: adds src/ to sys.path
 from config import WATCHLIST
@@ -24,6 +26,30 @@ st.set_page_config(
 # Derive portfolio structure and flat symbol list from config
 PORTFOLIO = {category.title(): symbols for category, symbols in WATCHLIST.items()}
 ALL_SYMBOLS = sorted(set(sym for symbols in WATCHLIST.values() for sym in symbols))
+
+# Persisted symbol order
+SYMBOL_ORDER_PATH = Path(__file__).parent / "data" / "symbol_order.json"
+
+
+def load_symbol_order() -> list[str]:
+    """Load saved symbol order, falling back to alphabetical."""
+    if SYMBOL_ORDER_PATH.exists():
+        try:
+            saved = json.loads(SYMBOL_ORDER_PATH.read_text())
+            # Reconcile: keep saved order, append any new symbols, drop removed ones
+            current = set(ALL_SYMBOLS)
+            ordered = [s for s in saved if s in current]
+            ordered += sorted(current - set(ordered))
+            return ordered
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return list(ALL_SYMBOLS)
+
+
+def save_symbol_order(order: list[str]) -> None:
+    """Persist symbol order to JSON."""
+    SYMBOL_ORDER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SYMBOL_ORDER_PATH.write_text(json.dumps(order))
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -80,8 +106,11 @@ def main():
     # Shared sidebar controls
     render_sidebar_controls()
 
+    # Load persisted symbol order
+    current_order = load_symbol_order()
+
     # Symbol selector
-    selected_symbol = st.sidebar.selectbox("Select Symbol", ALL_SYMBOLS, index=0)
+    selected_symbol = st.sidebar.selectbox("Select Symbol", current_order, index=0)
 
     # Initialize database (cached)
     db = get_db()
@@ -96,7 +125,7 @@ def main():
     if not prices_with_change.empty:
         # Build display data from batch result
         display_data = []
-        for symbol in ALL_SYMBOLS:
+        for symbol in current_order:
             symbol_df = prices_with_change[prices_with_change["symbol"] == symbol]
             if len(symbol_df) >= 2:
                 latest = symbol_df.iloc[0]
@@ -104,12 +133,14 @@ def main():
                 price = latest["close"]
                 change_pct = ((latest["close"] - previous["close"]) / previous["close"]) * 100
             elif len(symbol_df) == 1:
-                price = symbol_df.iloc[0]["close"]
+                latest = symbol_df.iloc[0]
+                price = latest["close"]
                 change_pct = 0
             else:
                 continue
 
-            # Determine sector
+            price_date = str(latest["date"]) if "date" in latest.index else ""
+
             sector = "Other"
             for sec, symbols in PORTFOLIO.items():
                 if symbol in symbols:
@@ -120,6 +151,7 @@ def main():
                 {
                     "Symbol": symbol,
                     "Sector": sector,
+                    "Date": price_date,
                     "Price": f"${price:.2f}",
                     "Change": f"{change_pct:+.2f}%",
                     "Change Value": change_pct,
@@ -143,6 +175,15 @@ def main():
                 width="stretch",
                 hide_index=True,
             )
+
+            # Collapsible drag-drop reorder
+            with st.expander("Reorder Symbols"):
+                symbols_with_data = [d["Symbol"] for d in display_data]
+                sorted_symbols = sort_items(symbols_with_data, direction="vertical")
+                if sorted_symbols != symbols_with_data:
+                    syms_without_data = [s for s in current_order if s not in set(symbols_with_data)]
+                    save_symbol_order(sorted_symbols + syms_without_data)
+                    st.rerun()
         else:
             st.warning("⚠️ No price data available. Click 'Refresh Data' to fetch.")
     else:
