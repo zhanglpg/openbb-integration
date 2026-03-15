@@ -9,6 +9,7 @@ testpaths = ["tests"]
 markers = [
     "unit: Unit tests (no external dependencies)",
     "integration: Integration tests (test component interactions)",
+    "validation: Data validation tests (require network, verify against SEC filings)",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",
