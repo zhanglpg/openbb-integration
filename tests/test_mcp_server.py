@@ -34,7 +34,6 @@ sys.modules.setdefault("fastmcp", _mock_fastmcp)
 # ---------------------------------------------------------------------------
 # Import after mocks are in place
 # ---------------------------------------------------------------------------
-from database import Database
 
 # We need to import the *functions* from mcp_server, but the module creates
 # a Database() at import time.  Patch DB_PATH + Database so import succeeds.
@@ -79,18 +78,15 @@ def _seed_prices(db, symbol, dates_and_closes):
 
 
 def _seed_fundamentals(db, symbol, snapshot_date="2025-06-01"):
-    """Insert a fundamentals row."""
-    df = pd.DataFrame(
-        {
-            "market_cap": [2_500_000_000_000],
-            "pe_ratio": [28.5],
-            "pb_ratio": [12.3],
-            "debt_to_equity": [1.5],
-            "return_on_equity": [0.35],
-            "dividend_yield": [0.006],
-        }
-    )
-    db.save_fundamentals(df, symbol, snapshot_date=snapshot_date)
+    """Insert a fundamentals row directly into SQLite for date control."""
+    with sqlite3.connect(db.db_path) as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO fundamentals
+               (symbol, snapshot_date, market_cap, pe_ratio, pb_ratio,
+                debt_to_equity, return_on_equity, dividend_yield)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (symbol, snapshot_date, 2_500_000_000_000, 28.5, 12.3, 1.5, 0.35, 0.006),
+        )
 
 
 def _seed_sec_filings(db, symbol):

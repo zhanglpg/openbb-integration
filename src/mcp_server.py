@@ -122,7 +122,10 @@ def get_sec_filings(symbol: str, limit: int = 10) -> list[dict]:
 
 @mcp.tool()
 def get_economic_indicators(series_ids: list[str] | None = None) -> list[dict]:
-    """Latest values for economic indicators (FRED series). Pass series_ids to filter, or None for all."""
+    """Latest values for economic indicators (FRED series).
+
+    Pass series_ids to filter, or None for all.
+    """
     df = db.get_latest_economic_indicators(series_ids)
     if df.empty:
         return []
