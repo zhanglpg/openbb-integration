@@ -12,11 +12,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from analysis import (  # noqa: I001, E402
+    compute_bollinger_bands,
+    compute_macd,
     compute_macro_snapshot,
     compute_portfolio_risk,
     compute_price_technicals,
     compute_sec_activity,
     compute_valuation_screen,
+    resample_ohlcv,
 )
 
 
@@ -397,3 +400,221 @@ class TestComputeSecActivity:
         result = compute_sec_activity(self._make_filings(), days=90)
         msft = [s for s in result["per_symbol"] if s["symbol"] == "MSFT"][0]
         assert msft["days_since_last"] >= 4  # filed ~5 days ago
+
+
+# ===================================================================
+# compute_bollinger_bands
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestComputeBollingerBands:
+    def test_output_columns(self):
+        df = _make_price_df(list(range(100, 130)))
+        result = compute_bollinger_bands(df)
+        assert list(result.columns) == ["date", "bb_middle", "bb_upper", "bb_lower"]
+
+    def test_nan_count(self):
+        df = _make_price_df(list(range(100, 130)))
+        result = compute_bollinger_bands(df, window=20)
+        # First 19 rows should be NaN (window - 1)
+        assert result["bb_middle"].isna().sum() == 19
+
+    def test_band_ordering(self):
+        df = _make_price_df(list(range(100, 130)))
+        result = compute_bollinger_bands(df)
+        valid = result.dropna()
+        assert (valid["bb_upper"] >= valid["bb_middle"]).all()
+        assert (valid["bb_middle"] >= valid["bb_lower"]).all()
+
+    def test_custom_window(self):
+        df = _make_price_df(list(range(100, 115)))
+        result = compute_bollinger_bands(df, window=5)
+        assert result["bb_middle"].isna().sum() == 4
+
+    def test_length_matches_input(self):
+        df = _make_price_df(list(range(100, 130)))
+        result = compute_bollinger_bands(df)
+        assert len(result) == len(df)
+
+
+# ===================================================================
+# compute_macd
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestComputeMacd:
+    def test_output_columns(self):
+        df = _make_price_df(list(range(100, 140)))
+        result = compute_macd(df)
+        assert list(result.columns) == ["date", "macd_line", "signal_line", "histogram"]
+
+    def test_histogram_approximates_diff(self):
+        df = _make_price_df(list(range(100, 140)))
+        result = compute_macd(df)
+        diff = result["macd_line"] - result["signal_line"]
+        # Allow small rounding tolerance since each column is independently rounded
+        assert np.allclose(diff, result["histogram"], atol=1e-3)
+
+    def test_length_matches_input(self):
+        df = _make_price_df(list(range(100, 140)))
+        result = compute_macd(df)
+        assert len(result) == len(df)
+
+    def test_no_nan(self):
+        # EWM doesn't produce NaN for the first values (unlike rolling)
+        df = _make_price_df(list(range(100, 140)))
+        result = compute_macd(df)
+        assert result["macd_line"].isna().sum() == 0
+
+
+# ===================================================================
+# resample_ohlcv
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestResampleOhlcv:
+    def _make_daily(self, n=30):
+        dates = pd.bdate_range("2025-01-01", periods=n)
+        return pd.DataFrame(
+            {
+                "date": dates.strftime("%Y-%m-%d"),
+                "open": [100 + i for i in range(n)],
+                "high": [105 + i for i in range(n)],
+                "low": [95 + i for i in range(n)],
+                "close": [102 + i for i in range(n)],
+                "volume": [1_000_000] * n,
+            }
+        )
+
+    def test_weekly_fewer_rows(self):
+        df = self._make_daily(30)
+        result = resample_ohlcv(df, "W")
+        assert len(result) < len(df)
+
+    def test_weekly_aggregation_rules(self):
+        # Start on a Monday so 5 bdays = exactly one week
+        dates = pd.bdate_range("2025-01-06", periods=5)  # Mon Jan 6
+        df = pd.DataFrame(
+            {
+                "date": dates.strftime("%Y-%m-%d"),
+                "open": [100, 101, 102, 103, 104],
+                "high": [105, 106, 107, 108, 109],
+                "low": [95, 96, 97, 98, 99],
+                "close": [102, 103, 104, 105, 106],
+                "volume": [1_000_000] * 5,
+            }
+        )
+        result = resample_ohlcv(df, "W")
+        assert len(result) == 1
+        # open = first day's open
+        assert result["open"].iloc[0] == 100
+        # high = max of all days' highs
+        assert result["high"].iloc[0] == 109
+        # low = min of all days' lows
+        assert result["low"].iloc[0] == 95
+        # close = last day's close
+        assert result["close"].iloc[0] == 106
+        # volume = sum
+        assert result["volume"].iloc[0] == 5_000_000
+
+    def test_monthly_resampling(self):
+        df = self._make_daily(60)
+        result = resample_ohlcv(df, "ME")
+        assert len(result) < len(df)
+
+    def test_output_columns(self):
+        df = self._make_daily(30)
+        result = resample_ohlcv(df, "W")
+        assert "date" in result.columns
+        assert "open" in result.columns
+        assert "close" in result.columns
+
+
+# ===================================================================
+# Edge cases — Bollinger Bands
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestBollingerBandsEdgeCases:
+    def test_insufficient_data_all_nan(self):
+        """Fewer rows than window → all NaN."""
+        df = _make_price_df([100, 101, 102])
+        result = compute_bollinger_bands(df, window=20)
+        assert result["bb_middle"].isna().all()
+
+    def test_constant_prices_zero_bandwidth(self):
+        """Constant prices → upper == middle == lower (std=0)."""
+        df = _make_price_df([100.0] * 25)
+        result = compute_bollinger_bands(df, window=20)
+        valid = result.dropna()
+        assert (valid["bb_upper"] == valid["bb_middle"]).all()
+        assert (valid["bb_lower"] == valid["bb_middle"]).all()
+
+    def test_single_row(self):
+        """Single row → all NaN, no crash."""
+        df = _make_price_df([100])
+        result = compute_bollinger_bands(df, window=20)
+        assert len(result) == 1
+        assert result["bb_middle"].isna().all()
+
+
+# ===================================================================
+# Edge cases — MACD
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestMacdEdgeCases:
+    def test_constant_prices_zero_macd(self):
+        """Constant prices → MACD line, signal, histogram all zero."""
+        df = _make_price_df([100.0] * 30)
+        result = compute_macd(df)
+        assert (result["macd_line"] == 0).all()
+        assert (result["signal_line"] == 0).all()
+        assert (result["histogram"] == 0).all()
+
+    def test_single_row(self):
+        """Single row → MACD computable (EWM handles it), no crash."""
+        df = _make_price_df([100])
+        result = compute_macd(df)
+        assert len(result) == 1
+        assert not result["macd_line"].isna().any()
+
+    def test_two_rows(self):
+        """Two rows → no crash, values computed."""
+        df = _make_price_df([100, 110])
+        result = compute_macd(df)
+        assert len(result) == 2
+
+
+# ===================================================================
+# Edge cases — resample_ohlcv
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestResampleEdgeCases:
+    def test_single_row_weekly(self):
+        """Single row resampled to weekly → 1 row."""
+        df = pd.DataFrame(
+            {
+                "date": ["2025-01-06"],
+                "open": [100],
+                "high": [105],
+                "low": [95],
+                "close": [102],
+                "volume": [1_000_000],
+            }
+        )
+        result = resample_ohlcv(df, "W")
+        assert len(result) == 1
+
+    def test_empty_df(self):
+        """Empty DataFrame → empty result, no crash."""
+        df = pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+        result = resample_ohlcv(df, "W")
+        assert result.empty

@@ -86,6 +86,81 @@ def compute_price_technicals(df: pd.DataFrame, symbol: str) -> dict:
     }
 
 
+def compute_bollinger_bands(
+    df: pd.DataFrame, window: int = 20, num_std: float = 2.0
+) -> pd.DataFrame:
+    """Compute Bollinger Bands for OHLCV data.
+
+    Args:
+        df: DataFrame with 'close' and 'date' columns, sorted by date ascending.
+        window: SMA window (default 20).
+        num_std: Number of standard deviations (default 2.0).
+
+    Returns:
+        DataFrame with columns [date, bb_middle, bb_upper, bb_lower].
+    """
+    closes = df["close"].astype(float)
+    bb_middle = closes.rolling(window=window).mean()
+    bb_std = closes.rolling(window=window).std()
+    return pd.DataFrame(
+        {
+            "date": df["date"].values,
+            "bb_middle": bb_middle.round(2).values,
+            "bb_upper": (bb_middle + num_std * bb_std).round(2).values,
+            "bb_lower": (bb_middle - num_std * bb_std).round(2).values,
+        }
+    )
+
+
+def compute_macd(df: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
+    """Compute MACD indicator.
+
+    Args:
+        df: DataFrame with 'close' and 'date' columns, sorted by date ascending.
+        fast: Fast EMA period (default 12).
+        slow: Slow EMA period (default 26).
+        signal: Signal line EMA period (default 9).
+
+    Returns:
+        DataFrame with columns [date, macd_line, signal_line, histogram].
+    """
+    closes = df["close"].astype(float)
+    ema_fast = closes.ewm(span=fast, adjust=False).mean()
+    ema_slow = closes.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    histogram = macd_line - signal_line
+    return pd.DataFrame(
+        {
+            "date": df["date"].values,
+            "macd_line": macd_line.round(4).values,
+            "signal_line": signal_line.round(4).values,
+            "histogram": histogram.round(4).values,
+        }
+    )
+
+
+def resample_ohlcv(df: pd.DataFrame, freq: str = "W") -> pd.DataFrame:
+    """Resample daily OHLCV data to weekly or monthly.
+
+    Args:
+        df: DataFrame with columns [date, open, high, low, close, volume].
+        freq: Pandas frequency string — 'W' for weekly, 'ME' for monthly.
+
+    Returns:
+        Resampled DataFrame with proper OHLCV aggregation.
+    """
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date")
+    resampled = (
+        df.resample(freq)
+        .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
+        .dropna()
+    )
+    return resampled.reset_index()
+
+
 def compute_valuation_screen(
     fundamentals_df: pd.DataFrame, sort_by: str = "pe_ratio"
 ) -> list[dict]:

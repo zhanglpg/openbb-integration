@@ -459,3 +459,84 @@ class TestBatchQueries:
         tmp_db.save_prices(df, "SOLO")
         result = tmp_db.get_latest_prices_batch_with_previous(["SOLO"])
         assert len(result) == 1  # only 1 row exists, can't compute change
+
+
+class TestGetPriceHistoryByDate:
+    """Tests for get_price_history_by_date() — date-range queries."""
+
+    def _insert_prices(self, tmp_db, symbol, dates):
+        """Insert price rows for given dates."""
+        df = pd.DataFrame(
+            {
+                "date": dates,
+                "open": [100.0] * len(dates),
+                "high": [105.0] * len(dates),
+                "low": [95.0] * len(dates),
+                "close": [102.0 + i for i in range(len(dates))],
+                "volume": [1_000_000] * len(dates),
+            }
+        )
+        tmp_db.save_prices(df, symbol)
+
+    def test_basic_date_range(self, tmp_db):
+        """Retrieve prices within a date range."""
+        self._insert_prices(tmp_db, "AAPL", ["2025-01-01", "2025-01-02", "2025-01-03"])
+        result = tmp_db.get_price_history_by_date("AAPL", "2025-01-01", "2025-01-03")
+        assert len(result) == 3
+
+    def test_partial_date_range(self, tmp_db):
+        """Only rows within the range are returned."""
+        self._insert_prices(
+            tmp_db, "AAPL", ["2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04"]
+        )
+        result = tmp_db.get_price_history_by_date("AAPL", "2025-01-02", "2025-01-03")
+        assert len(result) == 2
+        assert result["date"].iloc[0] == "2025-01-02"
+        assert result["date"].iloc[1] == "2025-01-03"
+
+    def test_sorted_ascending(self, tmp_db):
+        """Results should be sorted by date ascending."""
+        self._insert_prices(tmp_db, "AAPL", ["2025-01-03", "2025-01-01", "2025-01-02"])
+        result = tmp_db.get_price_history_by_date("AAPL", "2025-01-01", "2025-01-03")
+        assert list(result["date"]) == ["2025-01-01", "2025-01-02", "2025-01-03"]
+
+    def test_end_date_defaults_to_today(self, tmp_db):
+        """If end_date is None, it defaults to today."""
+        self._insert_prices(tmp_db, "AAPL", ["2025-01-01", "2025-06-15"])
+        result = tmp_db.get_price_history_by_date("AAPL", "2025-01-01")
+        assert len(result) == 2
+
+    def test_empty_for_unknown_symbol(self, tmp_db):
+        """Unknown symbol returns empty DataFrame."""
+        self._insert_prices(tmp_db, "AAPL", ["2025-01-01"])
+        result = tmp_db.get_price_history_by_date("UNKNOWN", "2025-01-01")
+        assert result.empty
+
+    def test_empty_for_out_of_range(self, tmp_db):
+        """Querying a date range with no data returns empty."""
+        self._insert_prices(tmp_db, "AAPL", ["2025-01-01", "2025-01-02"])
+        result = tmp_db.get_price_history_by_date("AAPL", "2025-06-01", "2025-06-30")
+        assert result.empty
+
+    def test_inclusive_boundaries(self, tmp_db):
+        """Start and end dates are inclusive."""
+        self._insert_prices(
+            tmp_db, "AAPL", ["2025-01-01", "2025-01-02", "2025-01-03"]
+        )
+        result = tmp_db.get_price_history_by_date("AAPL", "2025-01-01", "2025-01-01")
+        assert len(result) == 1
+        assert result["date"].iloc[0] == "2025-01-01"
+
+    def test_symbol_isolation(self, tmp_db):
+        """Data for one symbol does not leak into another."""
+        self._insert_prices(tmp_db, "AAPL", ["2025-01-01", "2025-01-02"])
+        self._insert_prices(tmp_db, "MSFT", ["2025-01-01", "2025-01-02", "2025-01-03"])
+        result = tmp_db.get_price_history_by_date("AAPL", "2025-01-01", "2025-01-03")
+        assert len(result) == 2  # AAPL only has 2 rows
+
+    def test_output_columns(self, tmp_db):
+        """Returned DataFrame should have the expected columns."""
+        self._insert_prices(tmp_db, "AAPL", ["2025-01-01"])
+        result = tmp_db.get_price_history_by_date("AAPL", "2025-01-01")
+        expected_cols = {"date", "open", "high", "low", "close", "volume", "adj_close"}
+        assert expected_cols == set(result.columns)

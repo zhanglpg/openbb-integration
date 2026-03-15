@@ -4,15 +4,17 @@ Streamlit Portfolio Dashboard
 Real-time portfolio monitoring with OpenBB data pipeline
 """
 
-import json
+import json  # noqa: I001
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 from streamlit_sortables import sort_items
 
 from shared import get_db, render_sidebar_controls  # must be first: adds src/ to sys.path
+
 from config import WATCHLIST
 
 # Page config
@@ -109,8 +111,10 @@ def main():
     # Load persisted symbol order
     current_order = load_symbol_order()
 
-    # Symbol selector
-    selected_symbol = st.sidebar.selectbox("Select Symbol", current_order, index=0)
+    # Symbol selector (shared across pages via session_state)
+    selected_symbol = st.sidebar.selectbox(
+        "Select Symbol", current_order, index=0, key="selected_symbol"
+    )
 
     # Initialize database (cached)
     db = get_db()
@@ -181,7 +185,9 @@ def main():
                 symbols_with_data = [d["Symbol"] for d in display_data]
                 sorted_symbols = sort_items(symbols_with_data, direction="vertical")
                 if sorted_symbols != symbols_with_data:
-                    syms_without_data = [s for s in current_order if s not in set(symbols_with_data)]
+                    syms_without_data = [
+                        s for s in current_order if s not in set(symbols_with_data)
+                    ]
                     save_symbol_order(sorted_symbols + syms_without_data)
                     st.rerun()
         else:
@@ -202,11 +208,27 @@ def main():
         history_df = get_price_history(selected_symbol, db, days=90)
 
         if not history_df.empty and "date" in history_df.columns and len(history_df) >= 2:
-            # Create chart
-            chart_data = history_df.set_index("date")[["close", "open"]]
-            chart_data.columns = ["Close", "Open"]
-
-            st.line_chart(chart_data)
+            # Mini candlestick chart
+            fig = go.Figure(
+                go.Candlestick(
+                    x=history_df["date"],
+                    open=history_df["open"],
+                    high=history_df["high"],
+                    low=history_df["low"],
+                    close=history_df["close"],
+                    increasing_line_color="#26a69a",
+                    decreasing_line_color="#ef5350",
+                )
+            )
+            fig.update_layout(
+                height=350,
+                xaxis_rangeslider_visible=False,
+                margin=dict(l=40, r=20, t=10, b=30),
+                showlegend=False,
+            )
+            fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption("[Open full chart view →](/Charts)")
 
             # Show stats
             latest_price = history_df["close"].iloc[-1]

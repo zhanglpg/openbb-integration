@@ -454,6 +454,31 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             return pd.read_sql_query(query, conn, params=(symbol, days))
 
+    def get_price_history_by_date(
+        self, symbol: str, start_date: str, end_date: str = None
+    ) -> pd.DataFrame:
+        """Get price history for a symbol within a date range.
+
+        Args:
+            symbol: Ticker symbol.
+            start_date: ISO date string (YYYY-MM-DD).
+            end_date: ISO date string, defaults to today.
+
+        Returns:
+            DataFrame with columns [date, open, high, low, close, volume, adj_close],
+            sorted by date ascending.
+        """
+        if end_date is None:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+        query = """
+            SELECT date, open, high, low, close, volume, adj_close
+            FROM price_history
+            WHERE symbol = ? AND date >= ? AND date <= ?
+            ORDER BY date ASC
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            return pd.read_sql_query(query, conn, params=(symbol, start_date, end_date))
+
     def get_latest_prices_batch(self, symbols: List[str], days: int = 1) -> pd.DataFrame:
         """Get the latest price row per symbol in one query."""
         if not symbols:

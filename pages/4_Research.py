@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from shared import get_db, render_sidebar_controls  # must be first: adds src/ to sys.path
@@ -136,8 +137,10 @@ def main():
 
     db = get_db()
 
-    # Symbol selector
-    symbol = st.selectbox("Select Symbol", ALL_SYMBOLS)
+    # Symbol selector (defaults to the symbol selected on the dashboard)
+    default_sym = st.session_state.get("selected_symbol", ALL_SYMBOLS[0])
+    default_idx = ALL_SYMBOLS.index(default_sym) if default_sym in ALL_SYMBOLS else 0
+    symbol = st.selectbox("Select Symbol", ALL_SYMBOLS, index=default_idx)
     if not symbol:
         return
 
@@ -198,9 +201,26 @@ def main():
             if not history.empty and "date" in history.columns:
                 history["date"] = pd.to_datetime(history["date"])
                 history = history.sort_values("date")
-                chart_data = history.set_index("date")[["close"]]
-                chart_data.columns = ["Close"]
-                st.line_chart(chart_data)
+                fig = go.Figure(
+                    go.Candlestick(
+                        x=history["date"],
+                        open=history["open"],
+                        high=history["high"],
+                        low=history["low"],
+                        close=history["close"],
+                        increasing_line_color="#26a69a",
+                        decreasing_line_color="#ef5350",
+                    )
+                )
+                fig.update_layout(
+                    height=350,
+                    xaxis_rangeslider_visible=False,
+                    margin=dict(l=40, r=20, t=10, b=30),
+                    showlegend=False,
+                )
+                fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption("[Open full chart view →](/Charts)")
             else:
                 st.warning("No price history available")
 
