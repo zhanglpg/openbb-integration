@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Current schema version — bump this when making incompatible changes.
 # Future code can compare this against the DB value to decide whether to migrate.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class Database:
@@ -85,11 +85,22 @@ class Database:
                     net_income REAL,
                     eps REAL,
                     free_cash_flow REAL,
+                    reporting_currency TEXT,
+                    trading_currency TEXT,
                     extra_data TEXT,
                     fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(symbol, snapshot_date)
                 )
             """)
+
+            # Schema v3 migration: add currency columns to existing tables
+            existing_cols = {
+                row[1] for row in conn.execute("PRAGMA table_info(fundamentals)").fetchall()
+            }
+            if "reporting_currency" not in existing_cols:
+                conn.execute("ALTER TABLE fundamentals ADD COLUMN reporting_currency TEXT")
+            if "trading_currency" not in existing_cols:
+                conn.execute("ALTER TABLE fundamentals ADD COLUMN trading_currency TEXT")
 
             # ----------------------------------------------------------
             # SEC filings — fixed columns, accession_number NOT NULL
@@ -284,6 +295,8 @@ class Database:
         "net_income",
         "eps",
         "free_cash_flow",
+        "reporting_currency",
+        "trading_currency",
     }
 
     def save_fundamentals(self, df: pd.DataFrame, symbol: str):

@@ -78,6 +78,24 @@ class WatchlistFetcher:
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
                 df = df.rename(columns=self._METRICS_RENAME)
+
+                # Store currency metadata from yfinance.
+                # financialCurrency = reporting currency (CNY for BABA)
+                # currency = trading/exchange currency (USD for US-listed)
+                try:
+                    import yfinance as yf
+
+                    info = yf.Ticker(symbol).info
+                    df["reporting_currency"] = info.get("financialCurrency") or "USD"
+                    df["trading_currency"] = info.get("currency") or "USD"
+                except Exception:
+                    df["reporting_currency"] = "USD"
+                    df["trading_currency"] = "USD"
+
+                # Drop the OpenBB 'currency' column if present (unreliable)
+                if "currency" in df.columns:
+                    df = df.drop(columns=["currency"])
+
                 df["symbol"] = symbol
                 df["fetched_at"] = datetime.now().isoformat()
                 return df

@@ -31,6 +31,22 @@ from research import analyze_symbol_deep, assess_macro_risks, compare_peers, scr
 
 ALL_SYMBOLS = sorted(set(sym for symbols in WATCHLIST.values() for sym in symbols))
 
+_CURRENCY_SYMBOLS = {
+    "USD": "$",
+    "CNY": "\u00a5",
+    "TWD": "NT$",
+    "JPY": "\u00a5",
+    "EUR": "\u20ac",
+    "GBP": "\u00a3",
+    "HKD": "HK$",
+    "KRW": "\u20a9",
+}
+
+
+def _get_currency_symbol(currency_code: str) -> str:
+    """Map a currency code to its display symbol."""
+    return _CURRENCY_SYMBOLS.get(currency_code, currency_code + " " if currency_code else "$")
+
 
 def _find_peer_category(symbol: str) -> tuple[str | None, list[str]]:
     """Return (category_name, peer_symbols) for the symbol's watchlist group."""
@@ -208,6 +224,26 @@ def fetch_balance(symbol: str, period: str = "annual") -> pd.DataFrame:
 @st.cache_data(ttl=3600, show_spinner="Loading cash flow...")
 def fetch_cashflow(symbol: str, period: str = "annual") -> pd.DataFrame:
     return DataFetcher().fetch_cash_flow(symbol, period=period)
+
+
+@st.cache_data(ttl=86400)
+def get_symbol_currencies(symbol: str, _db) -> tuple[str, str]:
+    """Get (reporting_currency, trading_currency) for a symbol.
+
+    Reads from DB fundamentals first; falls back to yfinance API.
+    """
+    fundamentals_df = _db.get_all_fundamentals()
+    if not fundamentals_df.empty:
+        sym_row = fundamentals_df[fundamentals_df["symbol"] == symbol]
+        if not sym_row.empty:
+            row = sym_row.iloc[0]
+            rc = row.get("reporting_currency")
+            tc = row.get("trading_currency")
+            if rc and tc and not pd.isna(rc) and not pd.isna(tc):
+                return str(rc), str(tc)
+
+    # Fallback to API calls
+    return fetch_reporting_currency(symbol), fetch_trading_currency(symbol)
 
 
 @st.cache_data(ttl=3600, show_spinner="Loading insider trades...")
@@ -758,8 +794,7 @@ def _render_valuation_history(symbol, db, cur="$"):
 
     # Compute FX rate when reporting currency != trading currency
     # (e.g. BABA reports in CNY but trades in USD)
-    fin_cur = fetch_reporting_currency(symbol)
-    trade_cur = fetch_trading_currency(symbol)
+    fin_cur, trade_cur = get_symbol_currencies(symbol, db)
     fx = fetch_fx_rate(fin_cur, trade_cur) if fin_cur != trade_cur else 1.0
     if fx != 1.0:
         st.caption(f"Currency adjustment applied: {fin_cur} → {trade_cur} (rate: {fx:.2f})")
@@ -1165,8 +1200,7 @@ def _render_comparison(symbols, db, cur="$"):
         pdf_sym = db.get_price_history_batch([sym], days=2000)
         if not pdf_sym.empty:
             pdf_sym = pdf_sym[pdf_sym["symbol"] == sym]
-        sym_fin_cur = fetch_reporting_currency(sym)
-        sym_trade_cur = fetch_trading_currency(sym)
+        sym_fin_cur, sym_trade_cur = get_symbol_currencies(sym, db)
         sym_fx = fetch_fx_rate(sym_fin_cur, sym_trade_cur) if sym_fin_cur != sym_trade_cur else 1.0
         vals = compute_historical_valuations(inc, bal, cf, pdf_sym, fx_rate=sym_fx)
         if not vals.empty:
@@ -1345,19 +1379,9 @@ def main():
     category = result["category"]
     peers = result["peers"]
 
-    # Reporting currency (shared across tabs)
-    _CURRENCY_SYMBOLS = {
-        "USD": "$",
-        "CNY": "\u00a5",
-        "TWD": "NT$",
-        "JPY": "\u00a5",
-        "EUR": "\u20ac",
-        "GBP": "\u00a3",
-        "HKD": "HK$",
-        "KRW": "\u20a9",
-    }
-    fin_currency = fetch_reporting_currency(symbol)
-    cur = _CURRENCY_SYMBOLS.get(fin_currency, fin_currency + " ")
+    # Currency resolution — prefer DB, fall back to API
+    fin_currency, trade_currency = get_symbol_currencies(symbol, db)
+    cur = _get_currency_symbol(fin_currency)
 
     # =====================================================================
     # TABS
@@ -1511,11 +1535,10 @@ def main():
         else:
             # Market cap and DB EPS are in trading currency (USD for ADRs);
             # revenue/FCF from income/cash flow statements are in reporting currency.
-            trade_cur_sym = _CURRENCY_SYMBOLS.get(fetch_trading_currency(symbol), "$")
-            if fin_currency != "USD":
+            trade_cur_sym = _get_currency_symbol(trade_currency)
+            if fin_currency != trade_currency:
                 st.caption(
-                    f"Revenue & FCF in {fin_currency} | "
-                    f"Market cap & EPS in {fetch_trading_currency(symbol)}"
+                    f"Revenue & FCF in {fin_currency} | Market cap & EPS in {trade_currency}"
                 )
             f_cols = st.columns(4)
             metrics = [

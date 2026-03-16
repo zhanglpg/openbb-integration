@@ -564,6 +564,69 @@ class TestSummarizeInsiderActivity:
 
 
 # ===================================================================
+# Database: fundamentals currency columns
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestFundamentalsCurrencyColumns:
+    def test_currency_columns_exist(self, tmp_db):
+        """Schema v3: reporting_currency and trading_currency columns exist."""
+        import sqlite3
+
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(fundamentals)").fetchall()}
+        assert "reporting_currency" in cols
+        assert "trading_currency" in cols
+
+    def test_save_and_retrieve_currencies(self, tmp_db):
+        """Currency columns are stored and retrieved correctly."""
+        df = pd.DataFrame(
+            {
+                "market_cap": [330e9],
+                "pe_ratio": [18.0],
+                "reporting_currency": ["CNY"],
+                "trading_currency": ["USD"],
+            }
+        )
+        tmp_db.save_fundamentals(df, "BABA")
+        result = tmp_db.get_all_fundamentals()
+        baba = result[result["symbol"] == "BABA"]
+        assert not baba.empty
+        assert baba["reporting_currency"].iloc[0] == "CNY"
+        assert baba["trading_currency"].iloc[0] == "USD"
+
+    def test_currencies_null_for_usd_stocks(self, tmp_db):
+        """USD stocks may have NULL currencies (backward compat)."""
+        df = pd.DataFrame({"market_cap": [3e12], "pe_ratio": [30.0]})
+        tmp_db.save_fundamentals(df, "AAPL")
+        result = tmp_db.get_all_fundamentals()
+        aapl = result[result["symbol"] == "AAPL"]
+        assert not aapl.empty
+        # pe_ratio still works even without currency columns
+        assert aapl["pe_ratio"].iloc[0] == 30.0
+
+    def test_currencies_stored_with_fundamentals(self, tmp_db):
+        """Currencies stored alongside all other fundamentals."""
+        df = pd.DataFrame(
+            {
+                "market_cap": [1.8e12],
+                "pe_ratio": [33.0],
+                "eps": [5.5],
+                "reporting_currency": ["TWD"],
+                "trading_currency": ["USD"],
+            }
+        )
+        tmp_db.save_fundamentals(df, "TSM")
+        result = tmp_db.get_all_fundamentals()
+        tsm = result[result["symbol"] == "TSM"]
+        assert tsm["reporting_currency"].iloc[0] == "TWD"
+        assert tsm["trading_currency"].iloc[0] == "USD"
+        assert tsm["pe_ratio"].iloc[0] == 33.0
+        assert tsm["eps"].iloc[0] == 5.5
+
+
+# ===================================================================
 # Database: research_notes CRUD
 # ===================================================================
 
