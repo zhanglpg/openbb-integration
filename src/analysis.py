@@ -506,6 +506,352 @@ def compute_macro_snapshot(indicator_histories: dict[str, pd.DataFrame]) -> dict
     }
 
 
+def compute_historical_valuations(
+    income_df: pd.DataFrame,
+    balance_df: pd.DataFrame,
+    cashflow_df: pd.DataFrame,
+    price_df: pd.DataFrame,
+    fx_rate: float = 1.0,
+) -> pd.DataFrame:
+    """Compute historical valuation multiples from quarterly financial data and prices.
+
+    For each quarter-end, finds the closest trading-day close price and computes
+    PE, PB, EV/EBITDA, and FCF yield.
+
+    Args:
+        income_df: Quarterly income statement with period_ending, net_income,
+            ebitda, diluted_earnings_per_share columns.
+        balance_df: Quarterly balance sheet with period_ending, total_equity,
+            total_debt, cash_and_cash_equivalents columns.
+        cashflow_df: Quarterly cash flow with period_ending, free_cash_flow.
+        price_df: Daily price history with date, close columns.
+        fx_rate: Exchange rate to convert financial data to the price currency.
+            E.g. if financials are in CNY and price is in USD, pass the
+            CNY-per-USD rate (~7.2) so that financial values are divided by
+            this rate before computing multiples.  Default 1.0 (no conversion).
+
+    Returns:
+        DataFrame with columns: period_ending, pe, pb, ev_ebitda, fcf_yield,
+        plus the underlying components.  Rows sorted by period_ending ascending.
+    """
+    if income_df is None or income_df.empty:
+        return pd.DataFrame()
+    if price_df is None or price_df.empty:
+        return pd.DataFrame()
+
+    # Prepare price series for lookups
+    pdf = price_df.copy()
+    pdf["date"] = pd.to_datetime(pdf["date"])
+    pdf = pdf.sort_values("date")
+
+    # Prepare income (need TTM for flow metrics)
+    inc = income_df.copy()
+    if "period_ending" not in inc.columns:
+        return pd.DataFrame()
+    inc["period_ending"] = pd.to_datetime(inc["period_ending"])
+    inc = inc.sort_values("period_ending").reset_index(drop=True)
+
+    # Build TTM income
+    ttm_cols = ["net_income", "ebitda", "diluted_earnings_per_share", "total_revenue"]
+    ttm_cols = [c for c in ttm_cols if c in inc.columns]
+    ttm_income = compute_ttm(inc, ttm_cols) if len(inc) >= 4 else pd.DataFrame()
+
+    # Prepare balance sheet
+    bal = pd.DataFrame()
+    if balance_df is not None and not balance_df.empty and "period_ending" in balance_df.columns:
+        bal = balance_df.copy()
+        bal["period_ending"] = pd.to_datetime(bal["period_ending"])
+        bal = bal.sort_values("period_ending")
+
+    # Prepare cash flow TTM
+    cf_ttm = pd.DataFrame()
+    if cashflow_df is not None and not cashflow_df.empty and "period_ending" in cashflow_df.columns:
+        cf = cashflow_df.copy()
+        cf["period_ending"] = pd.to_datetime(cf["period_ending"])
+        cf = cf.sort_values("period_ending").reset_index(drop=True)
+        cf_sum_cols = [c for c in ["free_cash_flow"] if c in cf.columns]
+        cf_ttm = compute_ttm(cf, cf_sum_cols) if len(cf) >= 4 else pd.DataFrame()
+
+    # Use TTM income dates as the base
+    if ttm_income.empty:
+        return pd.DataFrame()
+
+    rows = []
+    for _, inc_row in ttm_income.iterrows():
+        pe_date = inc_row["period_ending"]
+
+        # Find closest price (within 10 days after quarter end)
+        mask = (pdf["date"] >= pe_date) & (pdf["date"] <= pe_date + pd.Timedelta(days=10))
+        if mask.any():
+            close_price = pdf.loc[mask, "close"].iloc[0]
+        else:
+            # Fall back to last price before quarter end
+            before = pdf[pdf["date"] <= pe_date]
+            if before.empty:
+                continue
+            close_price = before["close"].iloc[-1]
+
+        row = {"period_ending": pe_date, "close_price": close_price}
+
+        # PE from TTM EPS (convert EPS to price currency via fx_rate)
+        eps = inc_row.get("diluted_earnings_per_share")
+        if eps is not None and not pd.isna(eps) and eps != 0:
+            row["pe"] = round(close_price / (eps / fx_rate), 2)
+        else:
+            row["pe"] = None
+
+        # PB from balance sheet
+        if not bal.empty:
+            bal_match = bal[bal["period_ending"] == pe_date]
+            if not bal_match.empty:
+                equity_col = (
+                    "total_equity_non_controlling_interests"
+                    if "total_equity_non_controlling_interests" in bal.columns
+                    else "total_equity"
+                    if "total_equity" in bal.columns
+                    else None
+                )
+                shares_col = (
+                    "common_stock_shares_outstanding"
+                    if "common_stock_shares_outstanding" in bal.columns
+                    else "share_issued"
+                    if "share_issued" in bal.columns
+                    else None
+                )
+                if equity_col and shares_col:
+                    equity = bal_match.iloc[0].get(equity_col)
+                    shares = bal_match.iloc[0].get(shares_col)
+                    if (
+                        equity is not None
+                        and shares is not None
+                        and not pd.isna(equity)
+                        and not pd.isna(shares)
+                        and shares > 0
+                    ):
+                        bvps = equity / shares / fx_rate
+                        if bvps > 0:
+                            row["pb"] = round(close_price / bvps, 2)
+
+                # EV/EBITDA (debt, cash, ebitda all in reporting currency)
+                debt_val = bal_match.iloc[0].get("total_debt")
+                cash_val = bal_match.iloc[0].get("cash_and_cash_equivalents")
+                ebitda_ttm = inc_row.get("ebitda")
+                if shares_col:
+                    shares_val = bal_match.iloc[0].get(shares_col)
+                    if (
+                        shares_val
+                        and not pd.isna(shares_val)
+                        and shares_val > 0
+                        and ebitda_ttm
+                        and not pd.isna(ebitda_ttm)
+                        and ebitda_ttm > 0
+                    ):
+                        market_cap = close_price * shares_val
+                        debt_num = debt_val / fx_rate if debt_val and not pd.isna(debt_val) else 0
+                        cash_num = cash_val / fx_rate if cash_val and not pd.isna(cash_val) else 0
+                        ev = market_cap + debt_num - cash_num
+                        row["ev_ebitda"] = round(ev / (ebitda_ttm / fx_rate), 2)
+
+        # FCF Yield from TTM cash flow
+        if not cf_ttm.empty:
+            cf_match = cf_ttm[cf_ttm["period_ending"] == pe_date]
+            if not cf_match.empty and "free_cash_flow" in cf_ttm.columns:
+                fcf = cf_match.iloc[0].get("free_cash_flow")
+                if not bal.empty:
+                    bal_match2 = bal[bal["period_ending"] == pe_date]
+                    shares_col2 = (
+                        "common_stock_shares_outstanding"
+                        if "common_stock_shares_outstanding" in bal.columns
+                        else "share_issued"
+                        if "share_issued" in bal.columns
+                        else None
+                    )
+                    if not bal_match2.empty and shares_col2:
+                        shares_val2 = bal_match2.iloc[0].get(shares_col2)
+                        if (
+                            fcf is not None
+                            and not pd.isna(fcf)
+                            and shares_val2
+                            and not pd.isna(shares_val2)
+                            and shares_val2 > 0
+                        ):
+                            market_cap2 = close_price * shares_val2
+                            if market_cap2 > 0:
+                                row["fcf_yield"] = round((fcf / fx_rate) / market_cap2 * 100, 2)
+
+        row.setdefault("pe", None)
+        row.setdefault("pb", None)
+        row.setdefault("ev_ebitda", None)
+        row.setdefault("fcf_yield", None)
+        rows.append(row)
+
+    if not rows:
+        return pd.DataFrame()
+
+    result = pd.DataFrame(rows).sort_values("period_ending").reset_index(drop=True)
+    return result
+
+
+def compute_growth_rates(income_df: pd.DataFrame) -> pd.DataFrame:
+    """Compute QoQ and YoY revenue/EPS growth rates from quarterly income data.
+
+    Args:
+        income_df: Quarterly income statement with period_ending,
+            total_revenue, diluted_earnings_per_share columns.
+
+    Returns:
+        DataFrame with columns: period_ending, revenue, eps,
+        rev_qoq, rev_yoy, eps_qoq, eps_yoy, rev_accelerating.
+    """
+    if income_df is None or income_df.empty or "period_ending" not in income_df.columns:
+        return pd.DataFrame()
+
+    df = income_df.copy()
+    df["period_ending"] = pd.to_datetime(df["period_ending"])
+    df = df.sort_values("period_ending").reset_index(drop=True)
+
+    result = df[["period_ending"]].copy()
+    if "total_revenue" in df.columns:
+        result["revenue"] = df["total_revenue"]
+        result["rev_qoq"] = df["total_revenue"].pct_change() * 100
+        result["rev_yoy"] = df["total_revenue"].pct_change(4) * 100
+        # Acceleration: current YoY growth > previous quarter's YoY growth
+        result["rev_accelerating"] = result["rev_yoy"].diff() > 0
+    if "diluted_earnings_per_share" in df.columns:
+        result["eps"] = df["diluted_earnings_per_share"]
+        result["eps_qoq"] = df["diluted_earnings_per_share"].pct_change() * 100
+        result["eps_yoy"] = df["diluted_earnings_per_share"].pct_change(4) * 100
+
+    return result
+
+
+def normalize_price_series(price_dfs: dict[str, pd.DataFrame], base: float = 100.0) -> pd.DataFrame:
+    """Normalize multiple price series to a common base for comparison.
+
+    Args:
+        price_dfs: Dict mapping symbol → DataFrame with [date, close].
+        base: Starting value (default 100).
+
+    Returns:
+        DataFrame with date index and one column per symbol, all starting at base.
+    """
+    if not price_dfs:
+        return pd.DataFrame()
+
+    series = {}
+    for sym, df in price_dfs.items():
+        if df is None or df.empty or "close" not in df.columns:
+            continue
+        d = df.copy()
+        d["date"] = pd.to_datetime(d["date"])
+        d = d.sort_values("date").set_index("date")
+        closes = d["close"].astype(float)
+        if closes.iloc[0] != 0:
+            series[sym] = closes / closes.iloc[0] * base
+        else:
+            series[sym] = closes
+
+    if not series:
+        return pd.DataFrame()
+
+    return pd.DataFrame(series).sort_index()
+
+
+def summarize_insider_activity(trades_df: pd.DataFrame) -> dict:
+    """Summarize insider trading activity.
+
+    Args:
+        trades_df: DataFrame with columns like transaction_date,
+            acquisition_or_disposition, securities_transacted, security_title,
+            owner_name, etc.
+
+    Returns:
+        Dict with buy/sell counts, net shares, top insiders, and recent trades.
+    """
+    if trades_df is None or trades_df.empty:
+        return {"total_trades": 0}
+
+    df = trades_df.copy()
+
+    # Normalize date column
+    date_col = None
+    for c in ["transaction_date", "filing_date", "date"]:
+        if c in df.columns:
+            date_col = c
+            break
+    if date_col:
+        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+        df = df.sort_values(date_col, ascending=False)
+
+    # Count buys vs sells
+    acq_col = None
+    for c in ["acquisition_or_disposition", "transaction_type"]:
+        if c in df.columns:
+            acq_col = c
+            break
+
+    buys = 0
+    sells = 0
+    if acq_col:
+        buys = len(df[df[acq_col].str.upper().str.startswith("A", na=False)])
+        sells = len(df[df[acq_col].str.upper().str.startswith("D", na=False)])
+
+    # Net shares
+    shares_col = None
+    for c in ["securities_transacted", "shares", "number_of_shares"]:
+        if c in df.columns:
+            shares_col = c
+            break
+
+    net_shares = None
+    if shares_col and acq_col:
+        df["_signed_shares"] = df.apply(
+            lambda r: (
+                r[shares_col] if str(r.get(acq_col, "")).upper().startswith("A") else -r[shares_col]
+            )
+            if pd.notna(r.get(shares_col))
+            else 0,
+            axis=1,
+        )
+        net_shares = int(df["_signed_shares"].sum())
+
+    # Top insiders
+    owner_col = None
+    for c in ["owner_name", "reporting_owner", "insider_name"]:
+        if c in df.columns:
+            owner_col = c
+            break
+
+    top_insiders = []
+    if owner_col:
+        top = df[owner_col].value_counts().head(5)
+        top_insiders = [{"name": name, "trades": int(count)} for name, count in top.items()]
+
+    # Recent trades (last 5)
+    recent = []
+    for _, row in df.head(5).iterrows():
+        entry = {}
+        if owner_col and pd.notna(row.get(owner_col)):
+            entry["owner"] = row[owner_col]
+        if date_col and pd.notna(row.get(date_col)):
+            entry["date"] = row[date_col].strftime("%Y-%m-%d")
+        if acq_col and pd.notna(row.get(acq_col)):
+            entry["type"] = "Buy" if str(row[acq_col]).upper().startswith("A") else "Sell"
+        if shares_col and pd.notna(row.get(shares_col)):
+            entry["shares"] = int(row[shares_col])
+        if entry:
+            recent.append(entry)
+
+    return {
+        "total_trades": len(df),
+        "buys": buys,
+        "sells": sells,
+        "net_shares": net_shares,
+        "top_insiders": top_insiders,
+        "recent_trades": recent,
+    }
+
+
 def compute_sec_activity(filings_df: pd.DataFrame, days: int = 90) -> dict:
     """Analyze SEC filing activity across symbols.
 

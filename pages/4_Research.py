@@ -15,11 +15,15 @@ from shared import get_db, render_sidebar_controls  # must be first: adds src/ t
 
 from analysis import (
     compute_financial_ratios,
+    compute_growth_rates,
+    compute_historical_valuations,
     compute_macro_snapshot,
     compute_portfolio_risk,
     compute_price_technicals,
     compute_ttm,
     compute_valuation_screen,
+    normalize_price_series,
+    summarize_insider_activity,
 )
 from config import WATCHLIST
 from fetcher import DataFetcher
@@ -143,6 +147,54 @@ def fetch_reporting_currency(symbol: str) -> str:
         return "USD"
 
 
+@st.cache_data(ttl=86400)
+def fetch_trading_currency(symbol: str) -> str:
+    """Get the trading currency for a symbol via yfinance."""
+    try:
+        import yfinance as yf
+
+        info = yf.Ticker(symbol).info
+        return info.get("currency") or "USD"
+    except Exception:
+        return "USD"
+
+
+@st.cache_data(ttl=86400)
+def fetch_fx_rate(from_currency: str, to_currency: str) -> float:
+    """Get exchange rate from_currency -> to_currency (how many from per 1 to).
+
+    E.g. fetch_fx_rate("CNY", "USD") returns ~7.2 (7.2 CNY per 1 USD).
+    Returns 1.0 if currencies are the same or lookup fails.
+    """
+    if from_currency == to_currency:
+        return 1.0
+    try:
+        import yfinance as yf
+
+        # yfinance format: "CNYUSD=X" gives CNY per USD
+        pair = f"{from_currency}{to_currency}=X"
+        ticker = yf.Ticker(pair)
+        hist = ticker.history(period="5d")
+        if not hist.empty:
+            rate = float(hist["Close"].iloc[-1])
+            if rate > 0:
+                # We need from_currency per to_currency
+                # CNYUSD=X gives "how many USD per 1 CNY" (e.g. 0.14)
+                # We want CNY per USD (e.g. 7.2) = 1/rate
+                return round(1.0 / rate, 4)
+        # Try reverse pair
+        pair_rev = f"{to_currency}{from_currency}=X"
+        ticker_rev = yf.Ticker(pair_rev)
+        hist_rev = ticker_rev.history(period="5d")
+        if not hist_rev.empty:
+            rate_rev = float(hist_rev["Close"].iloc[-1])
+            if rate_rev > 0:
+                return round(rate_rev, 4)
+    except Exception:
+        pass
+    return 1.0
+
+
 @st.cache_data(ttl=3600, show_spinner="Loading income statement...")
 def fetch_income(symbol: str, period: str = "annual") -> pd.DataFrame:
     return DataFetcher().fetch_income_statement(symbol, period=period)
@@ -156,6 +208,16 @@ def fetch_balance(symbol: str, period: str = "annual") -> pd.DataFrame:
 @st.cache_data(ttl=3600, show_spinner="Loading cash flow...")
 def fetch_cashflow(symbol: str, period: str = "annual") -> pd.DataFrame:
     return DataFetcher().fetch_cash_flow(symbol, period=period)
+
+
+@st.cache_data(ttl=3600, show_spinner="Loading insider trades...")
+def fetch_insider_trades(symbol: str) -> pd.DataFrame:
+    return DataFetcher().fetch_insider_trades(symbol)
+
+
+@st.cache_data(ttl=3600, show_spinner="Loading institutional holders...")
+def fetch_institutional(symbol: str) -> pd.DataFrame:
+    return DataFetcher().fetch_institutional_holders(symbol)
 
 
 # =========================================================================
@@ -681,13 +743,561 @@ def _render_ratio_analysis(symbol, income_df=None, balance_df=None, cashflow_df=
 
 
 # =========================================================================
+# Valuation History tab rendering (Enhancement #1)
+# =========================================================================
+
+
+def _render_valuation_history(symbol, db, cur="$"):
+    """Render historical valuation multiples (PE, PB, EV/EBITDA, FCF yield)."""
+    inc_df = fetch_income(symbol, "quarter")
+    bal_df = fetch_balance(symbol, "quarter")
+    cf_df = fetch_cashflow(symbol, "quarter")
+    price_df = db.get_price_history_batch([symbol], days=2000)
+    if not price_df.empty:
+        price_df = price_df[price_df["symbol"] == symbol]
+
+    # Compute FX rate when reporting currency != trading currency
+    # (e.g. BABA reports in CNY but trades in USD)
+    fin_cur = fetch_reporting_currency(symbol)
+    trade_cur = fetch_trading_currency(symbol)
+    fx = fetch_fx_rate(fin_cur, trade_cur) if fin_cur != trade_cur else 1.0
+    if fx != 1.0:
+        st.caption(f"Currency adjustment applied: {fin_cur} → {trade_cur} (rate: {fx:.2f})")
+
+    vals = compute_historical_valuations(inc_df, bal_df, cf_df, price_df, fx_rate=fx)
+    if vals.empty:
+        st.info("Insufficient data for historical valuation analysis")
+        return
+
+    labels = vals["period_ending"].apply(_period_label)
+
+    # Valuation Zone indicator
+    latest = vals.iloc[-1]
+    zone_items = []
+    for metric, label in [("pe", "PE"), ("pb", "PB"), ("ev_ebitda", "EV/EBITDA")]:
+        series = vals[metric].dropna()
+        if len(series) >= 4:
+            current = latest.get(metric)
+            if current is not None and not pd.isna(current):
+                pct_rank = (series < current).sum() / len(series) * 100
+                if pct_rank <= 25:
+                    zone_items.append((label, current, "Cheap", "#26a69a"))
+                elif pct_rank >= 75:
+                    zone_items.append((label, current, "Expensive", "#ef5350"))
+                else:
+                    zone_items.append((label, current, "Fair", "#FF9800"))
+
+    if zone_items:
+        st.subheader("Valuation Zone")
+        cols = st.columns(len(zone_items))
+        for col, (label, value, zone, color) in zip(cols, zone_items):
+            col.metric(label, f"{value:.1f}")
+            col.markdown(f":{color.replace('#', '')}[**{zone}**] vs own history")
+
+    st.divider()
+
+    # Chart 1: PE / PB over time with median lines
+    chart1, chart2 = st.columns(2)
+    with chart1:
+        fig = go.Figure()
+        if "pe" in vals.columns:
+            pe_clean = vals[vals["pe"].notna() & (vals["pe"] > 0) & (vals["pe"] < 200)]
+            if not pe_clean.empty:
+                pe_labels = pe_clean["period_ending"].apply(_period_label)
+                fig.add_trace(
+                    go.Scatter(
+                        x=pe_labels,
+                        y=pe_clean["pe"],
+                        name="PE",
+                        mode="lines+markers",
+                        line=dict(color="#2196F3"),
+                    )
+                )
+                pe_median = pe_clean["pe"].median()
+                fig.add_hline(
+                    y=pe_median,
+                    line_dash="dash",
+                    line_color="#2196F3",
+                    opacity=0.5,
+                    annotation_text=f"PE Median: {pe_median:.1f}",
+                )
+        if "pb" in vals.columns:
+            pb_clean = vals[vals["pb"].notna() & (vals["pb"] > 0) & (vals["pb"] < 100)]
+            if not pb_clean.empty:
+                pb_labels = pb_clean["period_ending"].apply(_period_label)
+                fig.add_trace(
+                    go.Scatter(
+                        x=pb_labels,
+                        y=pb_clean["pb"],
+                        name="PB",
+                        mode="lines+markers",
+                        line=dict(color="#FF9800"),
+                        yaxis="y2",
+                    )
+                )
+                pb_median = pb_clean["pb"].median()
+                fig.add_hline(
+                    y=pb_median,
+                    line_dash="dash",
+                    line_color="#FF9800",
+                    opacity=0.5,
+                )
+        fig.update_layout(
+            title="PE & PB Ratio History",
+            height=400,
+            margin=dict(l=40, r=40, t=40, b=30),
+            yaxis_title="PE",
+            yaxis2=dict(title="PB", overlaying="y", side="right"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Chart 2: EV/EBITDA and FCF Yield
+    with chart2:
+        fig = go.Figure()
+        if "ev_ebitda" in vals.columns:
+            ev_clean = vals[vals["ev_ebitda"].notna() & (vals["ev_ebitda"] > 0)]
+            if not ev_clean.empty:
+                ev_labels = ev_clean["period_ending"].apply(_period_label)
+                fig.add_trace(
+                    go.Scatter(
+                        x=ev_labels,
+                        y=ev_clean["ev_ebitda"],
+                        name="EV/EBITDA",
+                        mode="lines+markers",
+                        line=dict(color="#9C27B0"),
+                    )
+                )
+                ev_median = ev_clean["ev_ebitda"].median()
+                fig.add_hline(
+                    y=ev_median,
+                    line_dash="dash",
+                    line_color="#9C27B0",
+                    opacity=0.5,
+                    annotation_text=f"Median: {ev_median:.1f}",
+                )
+        if "fcf_yield" in vals.columns:
+            fcf_clean = vals[vals["fcf_yield"].notna()]
+            if not fcf_clean.empty:
+                fcf_labels = fcf_clean["period_ending"].apply(_period_label)
+                fig.add_trace(
+                    go.Scatter(
+                        x=fcf_labels,
+                        y=fcf_clean["fcf_yield"],
+                        name="FCF Yield %",
+                        mode="lines+markers",
+                        line=dict(color="#26a69a"),
+                        yaxis="y2",
+                    )
+                )
+        fig.update_layout(
+            title="EV/EBITDA & FCF Yield History",
+            height=400,
+            margin=dict(l=40, r=40, t=40, b=30),
+            yaxis_title="EV/EBITDA",
+            yaxis2=dict(title="FCF Yield %", overlaying="y", side="right"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("Valuation Data"):
+        display = vals.copy()
+        display["period_ending"] = labels.values
+        val_cols = ["period_ending", "close_price", "pe", "pb", "ev_ebitda", "fcf_yield"]
+        show_cols = [c for c in val_cols if c in display.columns]
+        st.dataframe(display[show_cols].sort_index(ascending=False), hide_index=True)
+
+
+# =========================================================================
+# Earnings & Growth tab rendering (Enhancement #2)
+# =========================================================================
+
+
+def _render_earnings_growth(symbol, cur="$"):
+    """Render earnings and revenue growth analysis from quarterly data."""
+    inc_df = fetch_income(symbol, "quarter")
+    if inc_df.empty or "period_ending" not in inc_df.columns:
+        st.info("No quarterly income data available for growth analysis")
+        return
+
+    growth = compute_growth_rates(inc_df)
+    if growth.empty:
+        st.info("Insufficient data for growth analysis")
+        return
+
+    labels = growth["period_ending"].apply(_period_label)
+
+    # Summary metrics
+    latest = growth.iloc[-1]
+    cols = st.columns(4)
+    if "rev_yoy" in growth.columns and pd.notna(latest.get("rev_yoy")):
+        cols[0].metric("Revenue YoY", f"{latest['rev_yoy']:+.1f}%")
+    if "rev_qoq" in growth.columns and pd.notna(latest.get("rev_qoq")):
+        cols[1].metric("Revenue QoQ", f"{latest['rev_qoq']:+.1f}%")
+    if "eps_yoy" in growth.columns and pd.notna(latest.get("eps_yoy")):
+        cols[2].metric("EPS YoY", f"{latest['eps_yoy']:+.1f}%")
+    if "rev_accelerating" in growth.columns:
+        accel = latest.get("rev_accelerating")
+        if pd.notna(accel):
+            cols[3].metric("Growth Trend", "Accelerating" if accel else "Decelerating")
+
+    # Chart 1: Revenue growth rate trend
+    chart1, chart2 = st.columns(2)
+    with chart1:
+        fig = go.Figure()
+        if "rev_yoy" in growth.columns:
+            yoy_clean = growth[growth["rev_yoy"].notna()]
+            if not yoy_clean.empty:
+                yoy_labels = yoy_clean["period_ending"].apply(_period_label)
+                colors = ["#26a69a" if v >= 0 else "#ef5350" for v in yoy_clean["rev_yoy"]]
+                fig.add_trace(
+                    go.Bar(
+                        x=yoy_labels,
+                        y=yoy_clean["rev_yoy"],
+                        name="YoY Growth",
+                        marker_color=colors,
+                    )
+                )
+        if "rev_qoq" in growth.columns:
+            qoq_clean = growth[growth["rev_qoq"].notna()]
+            if not qoq_clean.empty:
+                qoq_labels = qoq_clean["period_ending"].apply(_period_label)
+                fig.add_trace(
+                    go.Scatter(
+                        x=qoq_labels,
+                        y=qoq_clean["rev_qoq"],
+                        name="QoQ Growth",
+                        mode="lines+markers",
+                        line=dict(color="#FF9800", dash="dot"),
+                    )
+                )
+        fig.add_hline(y=0, line_dash="solid", line_color="gray", opacity=0.3)
+        fig.update_layout(
+            title="Revenue Growth Rate (%)",
+            height=400,
+            margin=dict(l=40, r=20, t=40, b=30),
+            yaxis_title="%",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Chart 2: EPS quarterly trend
+    with chart2:
+        fig = go.Figure()
+        if "eps" in growth.columns:
+            eps_clean = growth[growth["eps"].notna()]
+            if not eps_clean.empty:
+                eps_labels = eps_clean["period_ending"].apply(_period_label)
+                fig.add_trace(
+                    go.Bar(
+                        x=eps_labels,
+                        y=eps_clean["eps"],
+                        name="Quarterly EPS",
+                        marker_color="#2196F3",
+                    )
+                )
+                # Add TTM EPS as overlay (rolling 4-quarter sum)
+                if len(eps_clean) >= 4:
+                    ttm_eps = eps_clean["eps"].rolling(4).sum()
+                    fig.add_trace(
+                        go.Scatter(
+                            x=eps_labels,
+                            y=ttm_eps,
+                            name="TTM EPS",
+                            mode="lines+markers",
+                            line=dict(color="#9C27B0", width=2),
+                        )
+                    )
+        fig.update_layout(
+            title=f"EPS Trend ({cur})",
+            height=400,
+            margin=dict(l=40, r=20, t=40, b=30),
+            yaxis_title=f"EPS ({cur})",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Revenue bars
+    if "revenue" in growth.columns:
+        rev_clean = growth[growth["revenue"].notna()]
+        if not rev_clean.empty:
+            rev_labels = rev_clean["period_ending"].apply(_period_label)
+            fig = go.Figure()
+            fig.add_trace(
+                go.Bar(
+                    x=rev_labels,
+                    y=rev_clean["revenue"],
+                    name="Quarterly Revenue",
+                    marker_color="#2196F3",
+                )
+            )
+            fig.update_layout(
+                title="Quarterly Revenue",
+                height=350,
+                margin=dict(l=40, r=20, t=40, b=30),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("Growth Data"):
+        display = growth.copy()
+        display["period_ending"] = labels.values
+        show_cols = [
+            c
+            for c in ["period_ending", "revenue", "eps", "rev_qoq", "rev_yoy", "eps_qoq", "eps_yoy"]
+            if c in display.columns
+        ]
+        for c in ["rev_qoq", "rev_yoy", "eps_qoq", "eps_yoy"]:
+            if c in display.columns:
+                display[c] = display[c].apply(lambda v: f"{v:+.1f}%" if pd.notna(v) else "N/A")
+        st.dataframe(display[show_cols].sort_index(ascending=False), hide_index=True)
+
+
+# =========================================================================
+# Side-by-Side Comparison tab rendering (Enhancement #3)
+# =========================================================================
+
+
+def _render_comparison(symbols, db, cur="$"):
+    """Render side-by-side comparison of 2-3 symbols."""
+    if len(symbols) < 2:
+        st.info("Select at least 2 symbols to compare")
+        return
+
+    # Normalized price performance
+    st.subheader("Price Performance (Normalized)")
+    price_dfs = {}
+    for sym in symbols:
+        pdf = db.get_price_history_batch([sym], days=252)
+        if not pdf.empty:
+            price_dfs[sym] = pdf[pdf["symbol"] == sym]
+    normalized = normalize_price_series(price_dfs)
+    if not normalized.empty:
+        fig = go.Figure()
+        colors = ["#2196F3", "#FF9800", "#26a69a"]
+        for i, sym in enumerate(normalized.columns):
+            fig.add_trace(
+                go.Scatter(
+                    x=normalized.index,
+                    y=normalized[sym],
+                    name=sym,
+                    mode="lines",
+                    line=dict(color=colors[i % len(colors)], width=2),
+                )
+            )
+        fig.add_hline(y=100, line_dash="dash", line_color="gray", opacity=0.3)
+        fig.update_layout(
+            height=400,
+            margin=dict(l=40, r=20, t=20, b=30),
+            yaxis_title="Indexed (100 = start)",
+            xaxis_title="",
+        )
+        fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("No overlapping price data for comparison")
+
+    st.divider()
+
+    # Key metrics side-by-side
+    st.subheader("Key Metrics")
+    fundamentals_df = db.get_all_fundamentals()
+    metric_rows = []
+    for sym in symbols:
+        row = {"Symbol": sym}
+        if not fundamentals_df.empty:
+            sym_fund = fundamentals_df[fundamentals_df["symbol"] == sym]
+            if not sym_fund.empty:
+                f = sym_fund.iloc[0]
+                row["PE"] = _fmt(f.get("pe_ratio"), ".1f")
+                row["PB"] = _fmt(f.get("pb_ratio"), ".2f")
+                row["Market Cap"] = _fmt_large(f.get("market_cap"), currency=cur)
+                row["D/E"] = _fmt(f.get("debt_to_equity"), ".2f")
+                row["Div Yield"] = _fmt(f.get("dividend_yield"), ".2%")
+        # Technicals
+        prices = db.get_price_history_batch([sym], days=90)
+        if not prices.empty:
+            tech = compute_price_technicals(prices[prices["symbol"] == sym], sym)
+            row["90d Return"] = _fmt(tech.get("total_return_pct"), "+.1f", suffix="%")
+            row["Volatility"] = _fmt(tech.get("daily_volatility"), ".4f")
+            row["Max DD"] = _fmt(tech.get("max_drawdown_pct"), ".1f", suffix="%")
+        metric_rows.append(row)
+
+    if metric_rows:
+        st.dataframe(pd.DataFrame(metric_rows), hide_index=True)
+
+    st.divider()
+
+    # Margin comparison
+    st.subheader("Margin Comparison")
+    margin_fig = go.Figure()
+    colors = ["#2196F3", "#FF9800", "#26a69a"]
+    for i, sym in enumerate(symbols):
+        inc = fetch_income(sym, "quarter")
+        if not inc.empty and "period_ending" in inc.columns and "total_revenue" in inc.columns:
+            inc = inc.sort_values("period_ending").copy()
+            inc["period_ending"] = pd.to_datetime(inc["period_ending"])
+            if "operating_income" in inc.columns:
+                margin = (inc["operating_income"] / inc["total_revenue"].replace(0, pd.NA)) * 100
+                inc_labels = inc["period_ending"].apply(_period_label)
+                margin_fig.add_trace(
+                    go.Scatter(
+                        x=inc_labels,
+                        y=margin,
+                        name=f"{sym} Op Margin",
+                        mode="lines+markers",
+                        line=dict(color=colors[i % len(colors)]),
+                    )
+                )
+    margin_fig.update_layout(
+        title="Operating Margin Trends (%)",
+        height=400,
+        margin=dict(l=40, r=20, t=40, b=30),
+        yaxis_title="%",
+    )
+    st.plotly_chart(margin_fig, use_container_width=True)
+
+    st.divider()
+
+    # Valuation comparison
+    st.subheader("Valuation Comparison")
+    val_rows = []
+    for sym in symbols:
+        inc = fetch_income(sym, "quarter")
+        bal = fetch_balance(sym, "quarter")
+        cf = fetch_cashflow(sym, "quarter")
+        pdf_sym = db.get_price_history_batch([sym], days=2000)
+        if not pdf_sym.empty:
+            pdf_sym = pdf_sym[pdf_sym["symbol"] == sym]
+        sym_fin_cur = fetch_reporting_currency(sym)
+        sym_trade_cur = fetch_trading_currency(sym)
+        sym_fx = fetch_fx_rate(sym_fin_cur, sym_trade_cur) if sym_fin_cur != sym_trade_cur else 1.0
+        vals = compute_historical_valuations(inc, bal, cf, pdf_sym, fx_rate=sym_fx)
+        if not vals.empty:
+            latest_v = vals.iloc[-1]
+            val_rows.append(
+                {
+                    "Symbol": sym,
+                    "PE": _fmt(latest_v.get("pe"), ".1f"),
+                    "PB": _fmt(latest_v.get("pb"), ".2f"),
+                    "EV/EBITDA": _fmt(latest_v.get("ev_ebitda"), ".1f"),
+                    "FCF Yield %": _fmt(latest_v.get("fcf_yield"), ".2f"),
+                }
+            )
+    if val_rows:
+        st.dataframe(pd.DataFrame(val_rows), hide_index=True)
+
+
+# =========================================================================
+# Research Notes rendering (Enhancement #4)
+# =========================================================================
+
+
+def _render_research_notes(symbol, db):
+    """Render research notes section with add/view/delete."""
+    st.subheader("Research Notes")
+
+    # Input for new note
+    new_note = st.text_area(
+        "Add a research note / investment thesis",
+        key=f"note_input_{symbol}",
+        height=100,
+        placeholder=f"e.g., Bullish on {symbol} because...",
+    )
+    if st.button("Save Note", key=f"save_note_{symbol}"):
+        if new_note.strip():
+            db.save_note(symbol, new_note.strip())
+            st.success("Note saved!")
+            st.rerun()
+        else:
+            st.warning("Note cannot be empty")
+
+    # Display existing notes
+    notes_df = db.get_notes(symbol)
+    if notes_df.empty:
+        st.info(f"No research notes for {symbol} yet")
+        return
+
+    st.markdown(f"**{len(notes_df)} note(s) on record**")
+    for _, row in notes_df.iterrows():
+        with st.expander(f"{row['updated_at']}", expanded=(notes_df.index[0] == _)):
+            st.markdown(row["note"])
+            if st.button("Delete", key=f"del_note_{row['id']}"):
+                db.delete_note(row["id"])
+                st.rerun()
+
+
+# =========================================================================
+# Insider & Institutional Activity rendering (Enhancement #5)
+# =========================================================================
+
+
+def _render_insider_institutional(symbol):
+    """Render insider trading and institutional ownership."""
+    # Insider Trading
+    st.subheader("Insider Trading Activity")
+    insider_df = fetch_insider_trades(symbol)
+    if insider_df.empty:
+        st.info("No insider trading data available")
+    else:
+        summary = summarize_insider_activity(insider_df)
+        cols = st.columns(4)
+        cols[0].metric("Total Trades", summary.get("total_trades", 0))
+        cols[1].metric("Buys", summary.get("buys", 0))
+        cols[2].metric("Sells", summary.get("sells", 0))
+        net = summary.get("net_shares")
+        if net is not None:
+            cols[3].metric("Net Shares", f"{net:+,}")
+
+        # Recent trades table
+        recent = summary.get("recent_trades", [])
+        if recent:
+            st.markdown("**Recent Trades**")
+            st.dataframe(pd.DataFrame(recent), hide_index=True)
+
+        # Top insiders
+        top = summary.get("top_insiders", [])
+        if top:
+            with st.expander("Top Insiders by Trade Count"):
+                st.dataframe(pd.DataFrame(top), hide_index=True)
+
+    st.divider()
+
+    # Institutional Ownership
+    st.subheader("Institutional Ownership")
+    inst_df = fetch_institutional(symbol)
+    if inst_df.empty:
+        st.info("No institutional ownership data available")
+    else:
+        # Show top holders
+        display_cols = []
+        for c in ["investor_name", "shares_held", "percent_of_outstanding", "date_reported"]:
+            alt_names = {
+                "investor_name": ["investor", "holder_name", "name"],
+                "shares_held": ["shares", "value"],
+                "percent_of_outstanding": ["percent", "weight", "pct"],
+                "date_reported": ["date", "report_date"],
+            }
+            if c in inst_df.columns:
+                display_cols.append(c)
+            else:
+                for alt in alt_names.get(c, []):
+                    if alt in inst_df.columns:
+                        display_cols.append(alt)
+                        break
+
+        if display_cols:
+            st.dataframe(inst_df[display_cols].head(15), hide_index=True)
+        else:
+            st.dataframe(inst_df.head(15), hide_index=True)
+
+
+# =========================================================================
 # Main page
 # =========================================================================
 
 
 def main():
     st.title("Research")
-    st.markdown("**Symbol deep-dive analysis** | Technicals, fundamentals, financials, peers")
+    st.markdown(
+        "**Symbol deep-dive analysis** | Technicals, fundamentals, "
+        "valuations, growth, comparison, ownership"
+    )
 
     # Responsive CSS for metric cards on narrow screens
     st.markdown(
@@ -717,13 +1327,24 @@ def main():
     if not symbol:
         return
 
+    # Comparison mode toggle
+    compare_mode = st.checkbox("Compare symbols side-by-side")
+    compare_symbols = []
+    if compare_mode:
+        compare_symbols = st.multiselect(
+            "Select symbols to compare (2-3)",
+            ALL_SYMBOLS,
+            default=[symbol],
+            max_selections=3,
+        )
+
     result = run_deep_analysis(symbol, db)
     deep = result["deep"]
     peer_ctx = result["peer_context"]
     category = result["category"]
     peers = result["peers"]
 
-    # Reporting currency (shared across both tabs)
+    # Reporting currency (shared across tabs)
     _CURRENCY_SYMBOLS = {
         "USD": "$",
         "CNY": "\u00a5",
@@ -740,10 +1361,34 @@ def main():
     # =====================================================================
     # TABS
     # =====================================================================
-    tab_overview, tab_financials = st.tabs(["Overview", "Financial Statements"])
+    if compare_mode and len(compare_symbols) >= 2:
+        tab_compare, tab_overview, tab_financials, tab_valuation, tab_growth, tab_ownership = (
+            st.tabs(
+                [
+                    "Comparison",
+                    "Overview",
+                    "Financial Statements",
+                    "Valuation History",
+                    "Earnings & Growth",
+                    "Insider & Institutional",
+                ]
+            )
+        )
+        with tab_compare:
+            _render_comparison(compare_symbols, db, cur)
+    else:
+        tab_overview, tab_financials, tab_valuation, tab_growth, tab_ownership = st.tabs(
+            [
+                "Overview",
+                "Financial Statements",
+                "Valuation History",
+                "Earnings & Growth",
+                "Insider & Institutional",
+            ]
+        )
 
     # =====================================================================
-    # TAB 1: Overview (existing sections + macro risk + opportunities)
+    # TAB: Overview
     # =====================================================================
     with tab_overview:
         # Section 1: Signals
@@ -843,8 +1488,6 @@ def main():
 
                     info = yf.Ticker(symbol).info
                     if fund.get("dividend_yield") is None:
-                        # Use trailingAnnualDividendYield (ratio, e.g. 0.004)
-                        # NOT dividendYield which is a percentage (e.g. 0.42)
                         dy = info.get("trailingAnnualDividendYield")
                         if dy is not None:
                             fund["dividend_yield"] = dy
@@ -999,8 +1642,13 @@ def main():
             else:
                 st.info("No opportunities identified across watchlist")
 
+        st.divider()
+
+        # Section 8: Research Notes
+        _render_research_notes(symbol, db)
+
     # =====================================================================
-    # TAB 2: Financial Statements
+    # TAB: Financial Statements
     # =====================================================================
     with tab_financials:
         view_mode = st.radio(
@@ -1062,6 +1710,24 @@ def main():
         _render_cash_flow(symbol, cf_df, cur)
         st.divider()
         _render_ratio_analysis(symbol, inc_df, bal_df, cf_df)
+
+    # =====================================================================
+    # TAB: Valuation History (Enhancement #1)
+    # =====================================================================
+    with tab_valuation:
+        _render_valuation_history(symbol, db, cur)
+
+    # =====================================================================
+    # TAB: Earnings & Growth (Enhancement #2)
+    # =====================================================================
+    with tab_growth:
+        _render_earnings_growth(symbol, cur)
+
+    # =====================================================================
+    # TAB: Insider & Institutional (Enhancement #5)
+    # =====================================================================
+    with tab_ownership:
+        _render_insider_institutional(symbol)
 
     # =====================================================================
     # FOOTER

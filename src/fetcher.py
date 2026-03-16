@@ -138,6 +138,38 @@ class DataFetcher:
             logger.error("Error fetching SEC filings for %s: %s", symbol, e)
             return pd.DataFrame()
 
+    def fetch_insider_trades(
+        self, symbol: str, provider: str = "sec", limit: int = 50
+    ) -> pd.DataFrame:
+        """Fetch insider trading transactions."""
+        try:
+
+            def _call():
+                return obb.equity.ownership.insider_trading(symbol, provider=provider, limit=limit)
+
+            result = retry_fetch(_call, description=f"insider trades for {symbol}")
+            if hasattr(result, "to_dataframe"):
+                return result.to_dataframe()
+            return result
+        except Exception as e:
+            logger.error("Error fetching insider trades for %s: %s", symbol, e)
+            return pd.DataFrame()
+
+    def fetch_institutional_holders(self, symbol: str, provider: str = "sec") -> pd.DataFrame:
+        """Fetch institutional holders."""
+        try:
+
+            def _call():
+                return obb.equity.ownership.institutional(symbol, provider=provider)
+
+            result = retry_fetch(_call, description=f"institutional holders for {symbol}")
+            if hasattr(result, "to_dataframe"):
+                return result.to_dataframe()
+            return result
+        except Exception as e:
+            logger.error("Error fetching institutional holders for %s: %s", symbol, e)
+            return pd.DataFrame()
+
     def fetch_profile(self, symbol: str, provider: str = "yfinance") -> dict:
         """Fetch company profile."""
         try:

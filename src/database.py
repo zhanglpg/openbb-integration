@@ -159,6 +159,21 @@ class Database:
             """)
 
             # ----------------------------------------------------------
+            # Research notes
+            # ----------------------------------------------------------
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS research_notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    note TEXT NOT NULL,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_research_notes_symbol ON research_notes(symbol)"
+            )
+
+            # ----------------------------------------------------------
             # Indexes
             # ----------------------------------------------------------
             conn.execute(
@@ -676,6 +691,37 @@ class Database:
         """Get watchlist from database."""
         with sqlite3.connect(self.db_path) as conn:
             return pd.read_sql_query("SELECT * FROM watchlist WHERE is_active = 1", conn)
+
+    # ==================================================================
+    # Research notes
+    # ==================================================================
+
+    def save_note(self, symbol: str, note: str):
+        """Save a research note for a symbol (appends, does not overwrite)."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO research_notes (symbol, note) VALUES (?, ?)",
+                (symbol, note),
+            )
+            conn.commit()
+
+    def get_notes(self, symbol: str, limit: int = 20) -> pd.DataFrame:
+        """Get research notes for a symbol, most recent first."""
+        query = """
+            SELECT id, symbol, note, updated_at
+            FROM research_notes
+            WHERE symbol = ?
+            ORDER BY updated_at DESC, id DESC
+            LIMIT ?
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            return pd.read_sql_query(query, conn, params=(symbol, limit))
+
+    def delete_note(self, note_id: int):
+        """Delete a research note by ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM research_notes WHERE id = ?", (int(note_id),))
+            conn.commit()
 
 
 if __name__ == "__main__":
