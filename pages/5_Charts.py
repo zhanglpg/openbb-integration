@@ -74,7 +74,17 @@ def load_chart_data(_db, symbol: str, days_back: int) -> pd.DataFrame:
     return df
 
 
-def build_chart(df, chart_type, indicator, symbol, skip_gaps):
+MA_COLORS = {
+    "SMA 10": "#FF6B6B",
+    "SMA 20": "#4ECDC4",
+    "SMA 50": "#45B7D1",
+    "SMA 200": "#96CEB4",
+    "EMA 12": "#FFEAA7",
+    "EMA 26": "#DDA0DD",
+}
+
+
+def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
     """Build a Plotly figure with main price chart and bottom indicator panel."""
     has_indicator = indicator != "None"
     row_heights = [0.7, 0.3] if has_indicator else [1.0]
@@ -129,6 +139,27 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps):
                 name="Price",
                 increasing_line_color="#26a69a",
                 decreasing_line_color="#ef5350",
+            ),
+            row=1,
+            col=1,
+        )
+
+    # --- Moving Average overlays on Row 1 ---
+    for ma in ma_overlays or []:
+        parts = ma.split()
+        ma_type, period = parts[0], int(parts[1])
+        closes = df["close"]
+        if ma_type == "SMA":
+            values = closes.rolling(window=period).mean()
+        else:  # EMA
+            values = closes.ewm(span=period, adjust=False).mean()
+        fig.add_trace(
+            go.Scatter(
+                x=df["date"],
+                y=values,
+                mode="lines",
+                name=ma,
+                line=dict(color=MA_COLORS.get(ma, "#FFFFFF"), width=1.5),
             ),
             row=1,
             col=1,
@@ -272,8 +303,10 @@ def main():
     render_sidebar_controls()
 
     # --- Sidebar controls ---
-    # Default to the symbol selected on the dashboard (via session_state)
-    default_sym = st.session_state.get("selected_symbol", ALL_SYMBOLS[0])
+    # Prefer query param (from "Open full chart view" links), then session_state
+    query_sym = st.query_params.get("symbol")
+    fallback = st.session_state.get("selected_symbol", ALL_SYMBOLS[0])
+    default_sym = query_sym if query_sym in ALL_SYMBOLS else fallback
     default_idx = ALL_SYMBOLS.index(default_sym) if default_sym in ALL_SYMBOLS else 0
     symbol = st.sidebar.selectbox("Symbol", ALL_SYMBOLS, index=default_idx)
     chart_type = st.sidebar.radio("Chart Type", ["Candlestick", "Area", "OHLC Bars"])
@@ -282,6 +315,11 @@ def main():
     granularity = st.sidebar.selectbox("Granularity", ["Auto", "Daily", "Weekly", "Monthly"])
     indicator = st.sidebar.selectbox(
         "Bottom Indicator", ["Volume", "MACD", "Bollinger Bands", "None"]
+    )
+    ma_overlays = st.sidebar.multiselect(
+        "Moving Averages",
+        ["SMA 10", "SMA 20", "SMA 50", "SMA 200", "EMA 12", "EMA 26"],
+        default=["SMA 20", "SMA 50", "SMA 200"],
     )
 
     # --- Resolve granularity ---
@@ -315,7 +353,7 @@ def main():
     skip_gaps = freq == "D"
 
     # --- Build and render chart ---
-    fig = build_chart(df, chart_type, indicator, symbol, skip_gaps)
+    fig = build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays)
     st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
     # --- Metrics bar ---

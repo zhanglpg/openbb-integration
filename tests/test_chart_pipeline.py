@@ -637,3 +637,63 @@ class TestBuildChartSkipGaps:
         assert len(fig.data) == 5
         rb = fig.to_dict()["layout"]["xaxis"]["rangebreaks"]
         assert len(rb) == 1
+
+    def test_single_sma_overlay(self):
+        """A single SMA overlay adds one trace to the chart."""
+        df = self._daily_df(60)
+        fig = self.build_chart(
+            df, "Candlestick", "None", "AAPL", skip_gaps=True, ma_overlays=["SMA 20"]
+        )
+        # Candlestick + SMA 20 = 2 traces
+        assert len(fig.data) == 2
+        assert fig.data[1].name == "SMA 20"
+
+    def test_single_ema_overlay(self):
+        """A single EMA overlay adds one trace to the chart."""
+        df = self._daily_df(60)
+        fig = self.build_chart(
+            df, "Candlestick", "None", "AAPL", skip_gaps=True, ma_overlays=["EMA 12"]
+        )
+        assert len(fig.data) == 2
+        assert fig.data[1].name == "EMA 12"
+
+    def test_multiple_ma_overlays(self):
+        """Multiple MA overlays each add a trace with correct names and colors."""
+        df = self._daily_df(60)
+        mas = ["SMA 10", "SMA 20", "EMA 26"]
+        fig = self.build_chart(df, "Candlestick", "None", "AAPL", skip_gaps=True, ma_overlays=mas)
+        # Candlestick + 3 MAs = 4 traces
+        assert len(fig.data) == 4
+        ma_traces = fig.data[1:]
+        assert [t.name for t in ma_traces] == mas
+        assert ma_traces[0].line.color == "#FF6B6B"
+        assert ma_traces[1].line.color == "#4ECDC4"
+        assert ma_traces[2].line.color == "#DDA0DD"
+
+    def test_ma_overlays_with_indicator(self):
+        """MA overlays coexist with bottom-panel indicators."""
+        df = self._daily_df(60)
+        fig = self.build_chart(
+            df, "Candlestick", "MACD", "AAPL", skip_gaps=True, ma_overlays=["SMA 50"]
+        )
+        # Candlestick + SMA 50 + MACD histogram + MACD line + signal = 5
+        assert len(fig.data) == 5
+        assert fig.data[1].name == "SMA 50"
+
+    def test_all_six_ma_overlays(self):
+        """All 6 MA options render without errors."""
+        df = self._daily_df(250)  # enough data for SMA 200
+        all_mas = ["SMA 10", "SMA 20", "SMA 50", "SMA 200", "EMA 12", "EMA 26"]
+        fig = self.build_chart(
+            df, "Candlestick", "None", "AAPL", skip_gaps=True, ma_overlays=all_mas
+        )
+        # Candlestick + 6 MAs = 7
+        assert len(fig.data) == 7
+        # All should be serializable
+        fig.to_dict()
+
+    def test_no_ma_overlays_default(self):
+        """No MA overlays by default (backward compatible)."""
+        df = self._daily_df(30)
+        fig = self.build_chart(df, "Candlestick", "None", "AAPL", skip_gaps=True)
+        assert len(fig.data) == 1  # just candlestick

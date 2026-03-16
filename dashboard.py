@@ -228,7 +228,7 @@ def main():
             )
             fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
             st.plotly_chart(fig, use_container_width=True)
-            st.caption("[Open full chart view →](/Charts)")
+            st.caption(f"[Open full chart view →](/Charts?symbol={selected_symbol})")
 
             # Show stats
             latest_price = history_df["close"].iloc[-1]
