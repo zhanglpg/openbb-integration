@@ -61,6 +61,11 @@ class WatchlistFetcher:
             logger.error("Error fetching prices for %s: %s", symbol, e)
         return None
 
+    # Map OpenBB metrics column names → our DB schema names
+    _METRICS_RENAME = {
+        "price_to_book": "pb_ratio",
+    }
+
     def fetch_fundamentals(self, symbol: str) -> Optional[pd.DataFrame]:
         """Fetch fundamental metrics for a symbol."""
         try:
@@ -72,6 +77,7 @@ class WatchlistFetcher:
 
             if data is not None:
                 df = data.to_dataframe() if hasattr(data, "to_dataframe") else data
+                df = df.rename(columns=self._METRICS_RENAME)
                 df["symbol"] = symbol
                 df["fetched_at"] = datetime.now().isoformat()
                 return df

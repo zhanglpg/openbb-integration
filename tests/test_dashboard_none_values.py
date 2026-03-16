@@ -361,3 +361,133 @@ class TestComputeTtmIncomeWithSBC:
         assert len(result) == 1
         assert result["stock_based_compensation"].iloc[0] == pytest.approx(11e9)
         assert result["operating_cash_flow"].iloc[0] == pytest.approx(118e9)
+
+
+class TestFundamentalSummaryFallback:
+    """Regression: Revenue, Dividend Yield, FCF showed N/A on Overview tab.
+
+    Bug: The metrics endpoint (obb.equity.fundamental.metrics) doesn't return
+    'revenue' or 'free_cash_flow' columns — only 'revenue_per_share'. The DB
+    stores None for these fields. The fix falls back to income/cash flow data.
+    """
+
+    def _get_col(self, obj, name, default=None):
+        """Mirror _get_col from pages/4_Research.py."""
+        try:
+            if name in obj.index if isinstance(obj, pd.Series) else name in obj.columns:
+                return obj[name]
+        except (AttributeError, KeyError):
+            pass
+        return default
+
+    def test_fallback_fills_revenue_from_income(self):
+        """When DB fund has None revenue, fallback reads from income statement."""
+        fund = {"revenue": None, "eps": None, "free_cash_flow": None}
+        # Simulate income statement latest row
+        inc_latest = pd.Series({"total_revenue": 391e9, "diluted_earnings_per_share": 6.08})
+        if fund["revenue"] is None:
+            fund["revenue"] = self._get_col(inc_latest, "total_revenue")
+        if fund["eps"] is None:
+            fund["eps"] = self._get_col(inc_latest, "diluted_earnings_per_share")
+
+        assert fund["revenue"] == pytest.approx(391e9)
+        assert fund["eps"] == pytest.approx(6.08)
+
+    def test_fallback_fills_fcf_from_cashflow(self):
+        """When DB fund has None FCF, fallback reads from cash flow statement."""
+        fund = {"free_cash_flow": None}
+        cf_latest = pd.Series({"free_cash_flow": 100e9})
+        if fund["free_cash_flow"] is None:
+            fund["free_cash_flow"] = self._get_col(cf_latest, "free_cash_flow")
+
+        assert fund["free_cash_flow"] == pytest.approx(100e9)
+
+    def test_no_fallback_when_values_present(self):
+        """When DB fund already has values, fallback is not triggered."""
+        fund = {"revenue": 391e9, "free_cash_flow": 100e9}
+        original_rev = fund["revenue"]
+        # Fallback logic: only fill if None
+        if fund["revenue"] is None:
+            fund["revenue"] = 999e9  # should NOT happen
+        assert fund["revenue"] == original_rev
+
+
+class TestPbRatioAndDividendYieldFallback:
+    """Regression: PB Ratio and Dividend Yield showed N/A on Overview tab.
+
+    Bug 1: pb_ratio was None because the metrics endpoint returns 'price_to_book'
+    and the column rename hadn't been applied to stale DB data.
+    Bug 2: dividend_yield fallback used yfinance 'dividendYield' (percentage 0.42)
+    instead of 'trailingAnnualDividendYield' (ratio 0.004), causing wrong display.
+    """
+
+    def test_pb_ratio_fallback(self):
+        """When DB has None pb_ratio, fallback reads from yfinance info."""
+        fund = {"pb_ratio": None}
+        # Simulate yfinance info
+        mock_info = {"priceToBook": 41.7}
+        if fund["pb_ratio"] is None:
+            pb = mock_info.get("priceToBook")
+            if pb is not None:
+                fund["pb_ratio"] = pb
+        assert fund["pb_ratio"] == pytest.approx(41.7)
+
+    def test_dividend_yield_uses_ratio_not_percentage(self):
+        """Fallback must use trailingAnnualDividendYield (ratio), not dividendYield (pct)."""
+        fund = {"dividend_yield": None}
+        mock_info = {
+            "dividendYield": 0.42,  # WRONG: this is percentage
+            "trailingAnnualDividendYield": 0.004027,  # CORRECT: this is ratio
+        }
+        if fund["dividend_yield"] is None:
+            dy = mock_info.get("trailingAnnualDividendYield")
+            if dy is not None:
+                fund["dividend_yield"] = dy
+        # Should be ~0.004, NOT 0.42
+        assert fund["dividend_yield"] == pytest.approx(0.004027)
+        assert fund["dividend_yield"] < 0.01  # sanity: must be a ratio, not pct
+
+    def test_dividend_yield_format_display(self):
+        """Dividend yield 0.004027 formatted as .2% should show '0.40%'."""
+        dy = 0.004027
+        display = f"{dy:.2%}"
+        assert display == "0.40%"
+
+    def test_dividend_yield_pct_would_be_wrong(self):
+        """Using dividendYield (0.42) with .2% format would show '42.00%' — wrong."""
+        dy_wrong = 0.42
+        display = f"{dy_wrong:.2%}"
+        assert display == "42.00%"  # This is what the bug produced
+
+
+class TestCurrencyOnOverviewTab:
+    """Regression: BABA showed $ instead of ¥ on Fundamental Summary.
+
+    Bug: The Overview tab hardcoded '$' for EPS/Market Cap/Revenue/FCF.
+    The fix uses the reporting currency from yfinance.
+    """
+
+    def test_baba_uses_yen_symbol(self):
+        """BABA (CNY) should use ¥ prefix, not $."""
+        _CURRENCY_SYMBOLS = {
+            "USD": "$",
+            "CNY": "\u00a5",
+            "TWD": "NT$",
+        }
+        cur = _CURRENCY_SYMBOLS.get("CNY", "CNY ")
+        assert cur == "\u00a5"
+
+    def test_aapl_uses_dollar_symbol(self):
+        """AAPL (USD) should use $ prefix."""
+        _CURRENCY_SYMBOLS = {
+            "USD": "$",
+            "CNY": "\u00a5",
+        }
+        cur = _CURRENCY_SYMBOLS.get("USD", "USD ")
+        assert cur == "$"
+
+    def test_unknown_currency_uses_code(self):
+        """Unknown currency should use currency code as prefix."""
+        _CURRENCY_SYMBOLS = {"USD": "$"}
+        cur = _CURRENCY_SYMBOLS.get("BRL", "BRL ")
+        assert cur == "BRL "

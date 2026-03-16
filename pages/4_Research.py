@@ -723,6 +723,20 @@ def main():
     category = result["category"]
     peers = result["peers"]
 
+    # Reporting currency (shared across both tabs)
+    _CURRENCY_SYMBOLS = {
+        "USD": "$",
+        "CNY": "\u00a5",
+        "TWD": "NT$",
+        "JPY": "\u00a5",
+        "EUR": "\u20ac",
+        "GBP": "\u00a3",
+        "HKD": "HK$",
+        "KRW": "\u20a9",
+    }
+    fin_currency = fetch_reporting_currency(symbol)
+    cur = _CURRENCY_SYMBOLS.get(fin_currency, fin_currency + " ")
+
     # =====================================================================
     # TABS
     # =====================================================================
@@ -806,15 +820,52 @@ def main():
         # Section 3: Fundamental Summary
         st.subheader("Fundamental Summary")
         fund = deep.get("fundamental_summary", {})
+
+        # Fill gaps from income/cash flow statements when DB fundamentals are incomplete
+        if fund:
+            if fund.get("revenue") is None or fund.get("free_cash_flow") is None:
+                inc_df = fetch_income(symbol)
+                if not inc_df.empty and "period_ending" in inc_df.columns:
+                    latest_inc = inc_df.sort_values("period_ending").iloc[-1]
+                    if fund.get("revenue") is None and "total_revenue" in inc_df.columns:
+                        fund["revenue"] = _get_col(latest_inc, "total_revenue")
+                    if fund.get("eps") is None and "diluted_earnings_per_share" in inc_df.columns:
+                        fund["eps"] = _get_col(latest_inc, "diluted_earnings_per_share")
+            if fund.get("free_cash_flow") is None:
+                cf_df = fetch_cashflow(symbol)
+                if not cf_df.empty and "period_ending" in cf_df.columns:
+                    latest_cf = cf_df.sort_values("period_ending").iloc[-1]
+                    if "free_cash_flow" in cf_df.columns:
+                        fund["free_cash_flow"] = _get_col(latest_cf, "free_cash_flow")
+            if fund.get("dividend_yield") is None or fund.get("pb_ratio") is None:
+                try:
+                    import yfinance as yf
+
+                    info = yf.Ticker(symbol).info
+                    if fund.get("dividend_yield") is None:
+                        # Use trailingAnnualDividendYield (ratio, e.g. 0.004)
+                        # NOT dividendYield which is a percentage (e.g. 0.42)
+                        dy = info.get("trailingAnnualDividendYield")
+                        if dy is not None:
+                            fund["dividend_yield"] = dy
+                    if fund.get("pb_ratio") is None:
+                        pb = info.get("priceToBook")
+                        if pb is not None:
+                            fund["pb_ratio"] = pb
+                except Exception:
+                    pass
+
         if not fund or all(v is None for v in fund.values()):
             st.info("No fundamental data available for this symbol")
         else:
+            if fin_currency != "USD":
+                st.caption(f"Monetary values in {fin_currency}")
             f_cols = st.columns(4)
             metrics = [
                 ("PE Ratio", fund.get("pe_ratio"), ".1f", "", ""),
                 ("PB Ratio", fund.get("pb_ratio"), ".2f", "", ""),
                 ("Market Cap", fund.get("market_cap"), None, "", ""),
-                ("EPS", fund.get("eps"), ".2f", "$", ""),
+                ("EPS", fund.get("eps"), ".2f", cur, ""),
                 ("Revenue", fund.get("revenue"), None, "", ""),
                 ("Debt/Equity", fund.get("debt_to_equity"), ".2f", "", ""),
                 ("Dividend Yield", fund.get("dividend_yield"), ".2%", "", ""),
@@ -823,7 +874,7 @@ def main():
             for i, (label, value, fmt_str, prefix, suffix) in enumerate(metrics):
                 with f_cols[i % 4]:
                     if fmt_str is None:
-                        st.metric(label, _fmt_large(value))
+                        st.metric(label, _fmt_large(value, currency=cur))
                     elif fmt_str == ".2%":
                         display = _fmt(value, ".2%") if value is not None else "N/A"
                         st.metric(label, display)
@@ -1001,19 +1052,6 @@ def main():
                     ttm_dates = set(inc_df["period_ending"].dt.strftime("%Y-%m-%d"))
                     bal_df = bal_df[bal_df["period_ending"].astype(str).isin(ttm_dates)]
 
-        # Reporting currency
-        _CURRENCY_SYMBOLS = {
-            "USD": "$",
-            "CNY": "\u00a5",
-            "TWD": "NT$",
-            "JPY": "\u00a5",
-            "EUR": "\u20ac",
-            "GBP": "\u00a3",
-            "HKD": "HK$",
-            "KRW": "\u20a9",
-        }
-        fin_currency = fetch_reporting_currency(symbol)
-        cur = _CURRENCY_SYMBOLS.get(fin_currency, fin_currency + " ")
         if fin_currency != "USD":
             st.info(f"Financial data reported in **{fin_currency}** (reporting currency)")
 
