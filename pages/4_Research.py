@@ -1106,7 +1106,8 @@ def _render_comparison(symbols, db, cur="$"):
                 f = sym_fund.iloc[0]
                 row["PE"] = _fmt(f.get("pe_ratio"), ".1f")
                 row["PB"] = _fmt(f.get("pb_ratio"), ".2f")
-                row["Market Cap"] = _fmt_large(f.get("market_cap"), currency=cur)
+                # Market cap from DB is in trading currency (USD for all our symbols)
+                row["Market Cap"] = _fmt_large(f.get("market_cap"), currency="$")
                 row["D/E"] = _fmt(f.get("debt_to_equity"), ".2f")
                 row["Div Yield"] = _fmt(f.get("dividend_yield"), ".2%")
         # Technicals
@@ -1466,7 +1467,10 @@ def main():
         st.subheader("Fundamental Summary")
         fund = deep.get("fundamental_summary", {})
 
-        # Fill gaps from income/cash flow statements when DB fundamentals are incomplete
+        # Fill gaps from income/cash flow statements when DB fundamentals are incomplete.
+        # Note: income/cashflow values are in *reporting* currency (e.g. CNY for BABA),
+        # while DB fundamentals (pe, eps, market_cap) are in *trading* currency (USD).
+        eps_from_statement = False
         if fund:
             if fund.get("revenue") is None or fund.get("free_cash_flow") is None:
                 inc_df = fetch_income(symbol)
@@ -1476,6 +1480,7 @@ def main():
                         fund["revenue"] = _get_col(latest_inc, "total_revenue")
                     if fund.get("eps") is None and "diluted_earnings_per_share" in inc_df.columns:
                         fund["eps"] = _get_col(latest_inc, "diluted_earnings_per_share")
+                        eps_from_statement = True
             if fund.get("free_cash_flow") is None:
                 cf_df = fetch_cashflow(symbol)
                 if not cf_df.empty and "period_ending" in cf_df.columns:
@@ -1488,9 +1493,12 @@ def main():
 
                     info = yf.Ticker(symbol).info
                     if fund.get("dividend_yield") is None:
-                        dy = info.get("trailingAnnualDividendYield")
+                        # Use dividendYield (a percentage, e.g. 0.78 = 0.78%)
+                        # NOT trailingAnnualDividendYield which divides
+                        # foreign-currency dividends by USD price for ADRs
+                        dy = info.get("dividendYield")
                         if dy is not None:
-                            fund["dividend_yield"] = dy
+                            fund["dividend_yield"] = dy / 100
                     if fund.get("pb_ratio") is None:
                         pb = info.get("priceToBook")
                         if pb is not None:
@@ -1501,23 +1509,29 @@ def main():
         if not fund or all(v is None for v in fund.values()):
             st.info("No fundamental data available for this symbol")
         else:
+            # Market cap and DB EPS are in trading currency (USD for ADRs);
+            # revenue/FCF from income/cash flow statements are in reporting currency.
+            trade_cur_sym = _CURRENCY_SYMBOLS.get(fetch_trading_currency(symbol), "$")
             if fin_currency != "USD":
-                st.caption(f"Monetary values in {fin_currency}")
+                st.caption(
+                    f"Revenue & FCF in {fin_currency} | "
+                    f"Market cap & EPS in {fetch_trading_currency(symbol)}"
+                )
             f_cols = st.columns(4)
             metrics = [
                 ("PE Ratio", fund.get("pe_ratio"), ".1f", "", ""),
                 ("PB Ratio", fund.get("pb_ratio"), ".2f", "", ""),
-                ("Market Cap", fund.get("market_cap"), None, "", ""),
-                ("EPS", fund.get("eps"), ".2f", cur, ""),
-                ("Revenue", fund.get("revenue"), None, "", ""),
+                ("Market Cap", fund.get("market_cap"), None, trade_cur_sym, ""),
+                ("EPS", fund.get("eps"), ".2f", cur if eps_from_statement else trade_cur_sym, ""),
+                ("Revenue", fund.get("revenue"), None, cur, ""),
                 ("Debt/Equity", fund.get("debt_to_equity"), ".2f", "", ""),
                 ("Dividend Yield", fund.get("dividend_yield"), ".2%", "", ""),
-                ("Free Cash Flow", fund.get("free_cash_flow"), None, "", ""),
+                ("Free Cash Flow", fund.get("free_cash_flow"), None, cur, ""),
             ]
             for i, (label, value, fmt_str, prefix, suffix) in enumerate(metrics):
                 with f_cols[i % 4]:
                     if fmt_str is None:
-                        st.metric(label, _fmt_large(value, currency=cur))
+                        st.metric(label, _fmt_large(value, currency=prefix or "$"))
                     elif fmt_str == ".2%":
                         display = _fmt(value, ".2%") if value is not None else "N/A"
                         st.metric(label, display)
