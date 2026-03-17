@@ -31,11 +31,19 @@ ID: 1478248964842193018 ← #agents-war-room
 - [x] Store data in local database (SQLite) ✅ 2026-03-14
 - [x] Create economic indicators dashboard (FRED integration) ✅ 2026-03-14T15:50
 
-### Phase 3: AI Integration (Week 4+)
-- [ ] Set up MCP server for LLM tool use
-- [ ] Build research agent with OpenBB tools
-- [ ] Create automated report generation workflow
+### Phase 3: AI Integration (Week 4+) ✅ COMPLETE
+- [x] Set up MCP server for LLM tool use ✅ 2026-03-15
+- [x] Build analysis module (technicals, risk, valuations, macro) ✅ 2026-03-15
+- [x] Build research module (peer comparison, deep analysis, opportunities) ✅ 2026-03-16
+- [x] Create automated report generation workflow ✅ 2026-03-16
+- [x] Build multi-page Streamlit dashboard (Portfolio, Economy, Reports, Research, Charts) ✅ 2026-03-16
 - [ ] Integrate with Obsidian for note-taking
+
+### Phase 3.5: Daily Brief Enhancement (Current)
+- [ ] Create brief_exporter.py — export OpenBB data to JSON for briefs pipeline
+- [ ] Wire OpenBB quantitative data into portfolio brief generator
+- [ ] Add technical signals, risk dashboard, macro snapshot to briefs
+- [ ] Smart alerts (threshold-based) in briefs
 
 ### Phase 4: Custom Extensions (As Needed)
 - [ ] Add China-specific data providers (Wind, Choice, etc.)
@@ -43,7 +51,8 @@ ID: 1478248964842193018 ← #agents-war-room
 - [ ] Create domain-specific routers
 
 ## Status
-✅ Phase 2 COMPLETE — Data Pipeline Development (100%)
+✅ Phase 3 COMPLETE — AI Integration (MCP + Analysis + Research + Reports)
+🔄 Phase 3.5 IN PROGRESS — Daily Brief Enhancement
 
 ## Progress Log
 - 2026-03-14T07:08: Finance agent research complete ✅
@@ -80,11 +89,18 @@ ID: 1478248964842193018 ← #agents-war-room
   - Streamlit installed in virtual environment
   - Ready to run: `streamlit run dashboard.py`
 - 2026-03-15T09:49: **MCP Server complete** ✅
-  - Data layer exposed via MCP for LLM tool use
-  - Next: Analysis capabilities and research agent
+  - Data layer exposed via MCP for LLM tool use (6 data + 5 analysis + 2 report + 4 research tools)
+- 2026-03-15: **Analysis module complete** ✅
+  - `src/analysis.py` — technicals, valuations, risk, macro, SEC activity, growth, Bollinger/MACD
+- 2026-03-16: **Research & Reports complete** ✅
+  - `src/research.py` — peer comparison, deep analysis, macro risk assessment, opportunity screening
+  - `src/report.py` — daily report generation, alerts, markdown formatting
+  - Dashboard pages: Economy, Reports, Research, Charts
+- 2026-03-17: **Brief Enhancement kickoff** 🔄
+  - Merging OpenBB quantitative data into portfolio brief generator
 
 ## Stucks / Blockers
-_None — Phase 3 MCP server complete, building analysis capabilities_
+_None_
 
 ## Decision Log
 | Date | Decision | Rationale |
@@ -105,39 +121,50 @@ _None — Phase 3 MCP server complete, building analysis capabilities_
 | Polygon | ⏳ Pending | Optional, free tier available |
 
 ## Next Actions
-- [x] Phase 1 complete — environment ready ✅
-- [x] Phase 2 Sprint 1 complete — watchlist fetcher ✅
-- [x] Phase 2 Sprint 2 complete — SEC filings parser ✅
-- [x] Phase 2 Sprint 3 complete — SQLite storage ✅
-- [x] Phase 2 Sprint 4 complete — FRED integration ✅
-- [x] Phase 2 Sprint 5 complete — Streamlit dashboard ✅ 2026-03-14T16:30
-- [x] finance: Scheduled refresh (cron job) configured ✅
-- [x] Phase 3: MCP server for data layer ✅ 2026-03-15T09:49
-- [ ] main: Build analysis capabilities + research agent (Phase 3 continued)
+- [ ] Phase 3.5: Create brief_exporter.py — export OpenBB data for briefs
+- [ ] Phase 3.5: Wire OpenBB data into portfolio brief generator
+- [ ] Phase 3.5: Test end-to-end brief generation with quantitative data
+- [ ] Phase 4: `openbb-china` extension (when needed)
 
 ## Deliverables
 - [x] Phase 1: Working SDK setup with test queries ✅
 - [x] Phase 2: Watchlist data pipeline + SEC parser + SQLite storage + Dashboard + Cron ✅
-- [ ] Phase 3: MCP server + AI research agent (optional)
+- [x] Phase 3: MCP server + analysis + research + reports + multi-page dashboard ✅
+- [ ] Phase 3.5: Daily brief enhancement with OpenBB quantitative data
 - [ ] Phase 4: `openbb-china` extension (optional)
 
 ## File Structure
 ```
 openbb/
-├── README.md           # Full proposal
-├── project.md          # This file - project tracking
-├── dashboard.py        # Streamlit portfolio dashboard
+├── README.md                # Full proposal
+├── project.md               # This file - project tracking
+├── CLAUDE.md                # Claude Code instructions
+├── dashboard.py             # Streamlit main page (Portfolio)
+├── shared.py                # Shared Streamlit helpers
+├── pages/
+│   ├── 2_Economy.py         # Economic indicators page
+│   ├── 3_Reports.py         # Daily reports page
+│   ├── 4_Research.py        # Symbol research page
+│   └── 5_Charts.py          # Interactive charts page
 ├── src/
 │   ├── __init__.py
-│   ├── config.py       # Configuration & watchlist
-│   ├── database.py     # SQLite storage layer
-│   ├── watchlist_fetcher.py  # Price & fundamentals fetcher
-│   ├── sec_parser.py   # SEC filings parser
-│   ├── economic_dashboard.py # Economic indicators
-│   └── run_pipeline.py # Main entry point
+│   ├── config.py            # Configuration & watchlist
+│   ├── database.py          # SQLite storage layer (schema v2)
+│   ├── fetcher.py           # OpenBB SDK wrapper
+│   ├── retry.py             # Exponential backoff for API calls
+│   ├── watchlist_fetcher.py # Price & fundamentals orchestrator
+│   ├── sec_parser.py        # SEC filings parser
+│   ├── economic_dashboard.py # FRED economic indicators
+│   ├── storage.py           # Parquet storage
+│   ├── analysis.py          # Pure analysis functions (technicals, risk, macro)
+│   ├── report.py            # Daily report generation + alerts
+│   ├── research.py          # Peer comparison, deep analysis, opportunities
+│   ├── mcp_server.py        # MCP server (FastMCP) — 17 tools
+│   └── run_pipeline.py      # CLI entry point
+├── tests/                   # 20+ test files
 ├── data/
-│   └── openbb_data.db  # SQLite database
-└── .venv/              # Python virtual environment
+│   └── openbb_data.db       # SQLite database
+└── .venv/                   # Python virtual environment
 ```
 
 ## Usage
@@ -173,5 +200,4 @@ streamlit run dashboard.py
 - **GitHub:** https://github.com/OpenBB-finance/OpenBB
 - **Docs:** https://docs.openbb.co/platform
 - **Discord:** https://discord.gg/xPHTuHCmuV
-- **Proposal:** `./README.md`scord:** https://discord.gg/xPHTuHCmuV
 - **Proposal:** `./README.md`
