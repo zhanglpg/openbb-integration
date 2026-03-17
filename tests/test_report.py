@@ -213,6 +213,61 @@ class TestIdentifyAlerts:
         alerts = identify_alerts({}, {}, sec)
         assert any("8-K" in a["message"] for a in alerts)
 
+    def test_price_move_stock_alert(self):
+        portfolio = [{"symbol": "AAPL", "change_pct": 6.0}]
+        alerts = identify_alerts({}, {}, {}, portfolio_snapshot=portfolio)
+        price_alerts = [a for a in alerts if a["category"] == "price"]
+        assert len(price_alerts) == 1
+        assert "AAPL" in price_alerts[0]["message"]
+        assert price_alerts[0]["severity"] == "warning"
+
+    def test_price_move_etf_lower_threshold(self):
+        portfolio = [
+            {"symbol": "SPY", "change_pct": 3.5},  # ETF: >3% triggers
+            {"symbol": "AAPL", "change_pct": 3.5},  # Stock: <5% no trigger
+        ]
+        alerts = identify_alerts({}, {}, {}, portfolio_snapshot=portfolio)
+        price_alerts = [a for a in alerts if a["category"] == "price"]
+        symbols = [a["message"].split(":")[0] for a in price_alerts]
+        assert "SPY" in symbols
+        assert "AAPL" not in symbols
+
+    def test_valuation_alert_low_pe(self):
+        vals = [
+            {"symbol": "AAPL", "pe_ratio": 10.0},
+            {"symbol": "MSFT", "pe_ratio": 35.0},
+            {"symbol": "GOOGL", "pe_ratio": 30.0},
+            {"symbol": "NVDA", "pe_ratio": 40.0},
+        ]
+        # Median PE = (30+35)/2 = 32.5, cutoff = 32.5*0.8 = 26.0
+        alerts = identify_alerts({}, {}, {}, valuations=vals)
+        val_alerts = [a for a in alerts if a["category"] == "valuation"]
+        assert len(val_alerts) == 1
+        assert "AAPL" in val_alerts[0]["message"]
+        assert val_alerts[0]["severity"] == "info"
+
+    def test_correlation_high_alert(self):
+        risk = {"portfolio": {"avg_pairwise_correlation": 0.85}}
+        alerts = identify_alerts({}, {}, {}, risk_summary=risk)
+        corr_alerts = [a for a in alerts if "correlation" in a["message"].lower()]
+        assert len(corr_alerts) == 1
+        assert corr_alerts[0]["severity"] == "warning"
+
+    def test_custom_thresholds(self):
+        portfolio = [{"symbol": "AAPL", "change_pct": 3.0}]
+        # Default 5% threshold: no alert
+        alerts = identify_alerts({}, {}, {}, portfolio_snapshot=portfolio)
+        assert not any(a["category"] == "price" for a in alerts)
+        # Override to 2%: triggers alert
+        alerts = identify_alerts(
+            {},
+            {},
+            {},
+            portfolio_snapshot=portfolio,
+            thresholds={"price_move_stock_pct": 2.0},
+        )
+        assert any(a["category"] == "price" for a in alerts)
+
 
 # ===================================================================
 # generate_daily_report

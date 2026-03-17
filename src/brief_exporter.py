@@ -128,7 +128,14 @@ def export_brief_data(output_path: str | Path | None = None) -> dict:
     sec_activity = _build_sec_activity(days=90)
 
     # 7. Alerts
-    alerts = identify_alerts(technicals, macro_snapshot, sec_activity)
+    alerts = identify_alerts(
+        technicals,
+        macro_snapshot,
+        sec_activity,
+        portfolio_snapshot=portfolio_snapshot,
+        risk_summary=risk_summary,
+        valuations=valuations,
+    )
 
     data = {
         "generated_at": now.isoformat(),

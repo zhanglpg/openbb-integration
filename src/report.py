@@ -5,6 +5,8 @@ Composes analysis outputs into a structured morning briefing.
 
 from datetime import datetime
 
+from config import ALERT_THRESHOLDS, ETF_SYMBOLS
+
 
 def generate_daily_report(
     portfolio_overview: list[dict],
@@ -32,7 +34,14 @@ def generate_daily_report(
     report_date = report_date or datetime.now().strftime("%Y-%m-%d")
 
     movers = identify_notable_movers(portfolio_overview)
-    alerts = identify_alerts(technicals, macro_snapshot, sec_activity)
+    alerts = identify_alerts(
+        technicals,
+        macro_snapshot,
+        sec_activity,
+        portfolio_snapshot=portfolio_overview,
+        risk_summary=risk_summary,
+        valuations=valuations,
+    )
 
     # Market benchmarks (SPY/QQQ)
     benchmarks = []
@@ -229,6 +238,10 @@ def identify_alerts(
     technicals: dict[str, dict],
     macro_snapshot: dict,
     sec_activity: dict,
+    portfolio_snapshot: list[dict] | None = None,
+    risk_summary: dict | None = None,
+    valuations: list[dict] | None = None,
+    thresholds: dict | None = None,
 ) -> list[dict]:
     """Generate actionable alerts from analysis data.
 
@@ -236,10 +249,15 @@ def identify_alerts(
         technicals: Symbol → technicals dict.
         macro_snapshot: Macro environment snapshot.
         sec_activity: SEC filing activity summary.
+        portfolio_snapshot: Per-symbol price/change data.
+        risk_summary: Portfolio risk summary.
+        valuations: Valuation screen results.
+        thresholds: Override alert thresholds (merged with defaults).
 
     Returns:
         List of alert dicts with severity, category, and message.
     """
+    t = {**ALERT_THRESHOLDS, **(thresholds or {})}
     alerts = []
 
     # SMA crossover signals
@@ -249,7 +267,8 @@ def identify_alerts(
         sma5 = tech.get("sma_5")
         sma20 = tech.get("sma_20")
         if sma5 is not None and sma20 is not None:
-            if sma5 > sma20 * 1.02:
+            crossover_pct = t.get("sma_crossover_pct", 0.02)
+            if sma5 > sma20 * (1 + crossover_pct):
                 alerts.append(
                     {
                         "severity": "info",
@@ -260,7 +279,7 @@ def identify_alerts(
                         ),
                     }
                 )
-            elif sma5 < sma20 * 0.98:
+            elif sma5 < sma20 * (1 - crossover_pct):
                 alerts.append(
                     {
                         "severity": "warning",
@@ -274,7 +293,7 @@ def identify_alerts(
 
         # Volume surge
         vol_ratio = tech.get("volume_trend_ratio")
-        if vol_ratio is not None and vol_ratio > 2.0:
+        if vol_ratio is not None and vol_ratio > t.get("volume_surge_ratio", 2.0):
             alerts.append(
                 {
                     "severity": "info",
@@ -285,12 +304,78 @@ def identify_alerts(
 
         # Significant drawdown
         drawdown = tech.get("max_drawdown_pct")
-        if drawdown is not None and drawdown < -15:
+        if drawdown is not None and drawdown < t.get("drawdown_pct", -15):
             alerts.append(
                 {
                     "severity": "warning",
                     "category": "risk",
                     "message": f"{symbol}: Max drawdown of {drawdown:.1f}% in lookback period",
+                }
+            )
+
+    # Price movement alerts
+    if portfolio_snapshot:
+        stock_threshold = t.get("price_move_stock_pct", 5.0)
+        etf_threshold = t.get("price_move_etf_pct", 3.0)
+        for item in portfolio_snapshot:
+            chg = item.get("change_pct")
+            if chg is None:
+                continue
+            sym = item["symbol"]
+            threshold = etf_threshold if sym in ETF_SYMBOLS else stock_threshold
+            if abs(chg) > threshold:
+                direction = "up" if chg > 0 else "down"
+                alerts.append(
+                    {
+                        "severity": "warning",
+                        "category": "price",
+                        "message": (
+                            f"{sym}: {direction} {abs(chg):.1f}% — exceeds {threshold}% threshold"
+                        ),
+                    }
+                )
+
+    # Valuation alerts — flag symbols with PE well below median
+    if valuations:
+        pe_values = [
+            v["pe_ratio"] for v in valuations if v.get("pe_ratio") is not None and v["pe_ratio"] > 0
+        ]
+        if pe_values:
+            pe_values_sorted = sorted(pe_values)
+            mid = len(pe_values_sorted) // 2
+            if len(pe_values_sorted) % 2 == 0 and len(pe_values_sorted) >= 2:
+                median_pe = (pe_values_sorted[mid - 1] + pe_values_sorted[mid]) / 2
+            else:
+                median_pe = pe_values_sorted[mid]
+            discount_pct = t.get("valuation_pe_discount_pct", 20)
+            cutoff = median_pe * (1 - discount_pct / 100)
+            for v in valuations:
+                pe = v.get("pe_ratio")
+                if pe is not None and 0 < pe < cutoff:
+                    alerts.append(
+                        {
+                            "severity": "info",
+                            "category": "valuation",
+                            "message": (
+                                f"{v['symbol']}: PE {pe:.1f} is "
+                                f"{((median_pe - pe) / median_pe * 100):.0f}% below "
+                                f"peer median ({median_pe:.1f})"
+                            ),
+                        }
+                    )
+
+    # Correlation alert
+    if risk_summary:
+        avg_corr = risk_summary.get("portfolio", {}).get("avg_pairwise_correlation")
+        if avg_corr is not None and avg_corr > t.get("correlation_high", 0.7):
+            alerts.append(
+                {
+                    "severity": "warning",
+                    "category": "risk",
+                    "message": (
+                        f"Portfolio avg pairwise correlation is {avg_corr:.2f} — "
+                        f"high concentration risk"
+                    ),
                 }
             )
 
@@ -315,7 +400,7 @@ def identify_alerts(
 
     # SEC alerts — recent 8-K filings
     recent_8k = sec_activity.get("recent_8k_activity", [])
-    if len(recent_8k) > 5:
+    if len(recent_8k) > t.get("sec_8k_count", 5):
         alerts.append(
             {
                 "severity": "info",

@@ -67,26 +67,24 @@ All 6 sections are exported by `src/brief_exporter.py` and formatted by `fetcher
 
 ---
 
-### Phase 3: Smart Alerts (Week 3) 🟡 **PARTIAL**
+### Phase 3: Smart Alerts (Week 3) ✅ **COMPLETE** (2026-03-17)
 
 **Goal:** Automated alerts based on thresholds
 
-Existing alerts are implemented in `src/report.py:identify_alerts()` (lines 228-327):
+All alerts implemented in `src/report.py:identify_alerts()` with configurable thresholds via `src/config.py:ALERT_THRESHOLDS`:
 
 | Alert Type | Trigger | Action | Status |
 |------------|---------|--------|--------|
 | **Technical Alert** | SMA crossover (±2%), volume spike (>2x), drawdown (>15%) | Included in alerts section | ✅ |
 | **Macro Alert** | Yield curve inverted, VIX >25 | Included in alerts section | ✅ |
 | **SEC Alert** | 8-K count >5 for a symbol | Included in alerts section | ✅ |
-| **Price Alert** | >5% daily move (stock), >3% (ETF) | Not yet implemented | ⚪ |
-| **Valuation Alert** | PE significantly below peer/historical avg | Not yet implemented | ⚪ |
-| **Correlation Alert** | Portfolio avg correlation >0.7 | Not yet implemented | ⚪ |
-| **Configurable Thresholds** | All alert thresholds via config (currently hardcoded) | Not yet implemented | ⚪ |
-| **Discord Notifications** | Push alerts to Discord channel | Not yet implemented | ⚪ |
+| **Price Alert** | >5% daily move (stock), >3% (ETF) | Included in alerts section | ✅ |
+| **Valuation Alert** | PE significantly below peer median | Included in alerts section | ✅ |
+| **Correlation Alert** | Portfolio avg correlation >0.7 | Included in alerts section | ✅ |
+| **Configurable Thresholds** | `ALERT_THRESHOLDS` dict in config + runtime `thresholds` override | All thresholds configurable | ✅ |
+| **Discord Notifications** | Push alerts to Discord channel | Descoped — not needed for brief pipeline | ➖ |
 
-**Remaining effort:** 2-3 hours
-
-**Deliverable:** Additional alert types, configurable thresholds, Discord notifications
+**Deliverable:** 7 alert types with configurable thresholds, integrated into brief export
 
 ---
 
@@ -219,8 +217,9 @@ Week 4: MCP Integration
 | 2026-03-17 | **Phase 1 complete** | ✅ |
 | 2026-03-17 | Phase 2: All 6 enhanced sections already built in brief_exporter + fetcher | ✅ |
 | 2026-03-17 | **Phase 2 complete** | ✅ |
-| 2026-03-17 | Phase 3: Core alerts implemented in report.py:identify_alerts() | 🟡 |
-| — | Phase 3: Remaining — price/valuation/correlation alerts, config thresholds, Discord | ⚪ |
+| 2026-03-17 | Phase 3: Core alerts implemented in report.py:identify_alerts() | ✅ |
+| 2026-03-17 | Phase 3: Price, valuation, correlation alerts + configurable thresholds | ✅ |
+| 2026-03-17 | **Phase 3 complete** (Discord descoped) | ✅ |
 | 2026-03-17 | Phase 4: 17 MCP tools implemented in mcp_server.py | ✅ |
 | 2026-03-17 | **Phase 4 complete** | ✅ |
 
@@ -236,9 +235,7 @@ _None_
 
 - [x] ~~Phase 1 complete~~ — All 4 tasks done, 45 tests passing
 - [x] ~~Phase 2 complete~~ — All 6 enhanced sections built into brief_exporter + fetcher
-- [ ] **Phase 3 (remaining):** Add price movement alert (>5% daily), valuation alert (PE vs peers), correlation alert (>0.7)
-- [ ] **Phase 3 (remaining):** Make alert thresholds configurable (currently hardcoded in `report.py:identify_alerts()`)
-- [ ] **Phase 3 (remaining):** Add Discord notification backend for alerts
+- [x] ~~Phase 3 complete~~ — 7 alert types, configurable thresholds, Discord descoped
 - [x] ~~Phase 4 complete~~ — 17 MCP tools in mcp_server.py
 - [ ] Run a live portfolio brief generation to validate full pipeline with real data
 
@@ -253,4 +250,4 @@ _None_
 
 ---
 
-*Last updated: 2026-03-17 — Phases 1, 2, 4 complete; Phase 3 partial*
+*Last updated: 2026-03-17 — All phases complete (1, 2, 3, 4). Discord descoped from Phase 3.*

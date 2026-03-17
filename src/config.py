@@ -44,3 +44,17 @@ PIPELINE_DEFAULTS = {
     "max_retries": 3,
     "retry_backoff_base": 2,  # exponential backoff base in seconds
 }
+
+# Alert thresholds — used by report.identify_alerts()
+ALERT_THRESHOLDS = {
+    "sma_crossover_pct": 0.02,
+    "volume_surge_ratio": 2.0,
+    "drawdown_pct": -15,
+    "price_move_stock_pct": 5.0,
+    "price_move_etf_pct": 3.0,
+    "valuation_pe_discount_pct": 20,
+    "correlation_high": 0.7,
+    "sec_8k_count": 5,
+}
+
+ETF_SYMBOLS = {"SPY", "QQQ", "FXI", "KWEB", "ARKK"}
