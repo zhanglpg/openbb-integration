@@ -48,78 +48,64 @@ Merge OpenBB quantitative data with existing news-driven brief generation to cre
 
 ---
 
-### Phase 2: Enhanced Sections (Week 2)
+### Phase 2: Enhanced Sections (Week 2) ✅ **COMPLETE** (2026-03-17)
 
 **Goal:** Add new data-rich sections to the brief
 
+All 6 sections are exported by `src/brief_exporter.py` and formatted by `fetcher.py` (`_format_openbb_for_prompt()`):
+
 | New Section | OpenBB Data Source | Example Content | Status |
 |-------------|-------------------|-----------------|--------|
-| **Portfolio Snapshot** | `get_portfolio_overview()` | Table with prices, changes, volume | ⚪ |
-| **Technical Signals** | `compute_price_technicals()` | SMA positions, volatility, drawdown | ⚪ |
-| **Valuation Check** | `compute_valuation_screen()` | PE, PB, PEG vs. historical averages | ⚪ |
-| **Risk Dashboard** | `compute_portfolio_risk()` | Most volatile, correlation, Sharpe | ⚪ |
-| **Macro Snapshot** | `compute_macro_snapshot()` | Yield curve, VIX regime, Fed direction | ⚪ |
-| **SEC Activity** | `get_sec_filings()` | Recent 8-K/10-Q filings for holdings | ⚪ |
-
-**Effort:** 4-6 hours
+| **Portfolio Snapshot** | `_build_portfolio_snapshot()` | Price, change_pct, volume, sector | ✅ |
+| **Technical Signals** | `analysis.compute_price_technicals()` | SMA-5/10/20, volatility, drawdown, volume trend | ✅ |
+| **Valuation Check** | `analysis.compute_valuation_screen()` | PE, PB, FCF yield, earnings yield | ✅ |
+| **Risk Dashboard** | `analysis.compute_portfolio_risk()` | Per-symbol volatility/Sharpe, correlation, concentration | ✅ |
+| **Macro Snapshot** | `analysis.compute_macro_snapshot()` | FRED indicators, yield curve, VIX regime, rate direction | ✅ |
+| **SEC Activity** | `analysis.compute_sec_activity()` | Per-symbol filings, 8-K highlights, inactive symbols | ✅ |
 
 **Deliverable:** Brief has 6 new quantitative sections
 
 ---
 
-### Phase 3: Smart Alerts (Week 3)
+### Phase 3: Smart Alerts (Week 3) 🟡 **PARTIAL**
 
 **Goal:** Automated alerts based on thresholds
 
+Existing alerts are implemented in `src/report.py:identify_alerts()` (lines 228-327):
+
 | Alert Type | Trigger | Action | Status |
 |------------|---------|--------|--------|
-| **Price Alert** | >5% daily move (stock), >3% (ETF) | Flag in brief + Discord notification | ⚪ |
-| **Technical Alert** | Crosses SMA-20, volume spike >2x | Add to "Technical Signals" section | ⚪ |
-| **Valuation Alert** | PE < historical avg by 20% | Flag as "Potential Opportunity" | ⚪ |
-| **Risk Alert** | VIX >25, correlation >0.7 | Add to "Risk Dashboard" | ⚪ |
-| **SEC Alert** | 8-K filing for portfolio stock | Add to "SEC Activity" with summary | ⚪ |
+| **Technical Alert** | SMA crossover (±2%), volume spike (>2x), drawdown (>15%) | Included in alerts section | ✅ |
+| **Macro Alert** | Yield curve inverted, VIX >25 | Included in alerts section | ✅ |
+| **SEC Alert** | 8-K count >5 for a symbol | Included in alerts section | ✅ |
+| **Price Alert** | >5% daily move (stock), >3% (ETF) | Not yet implemented | ⚪ |
+| **Valuation Alert** | PE significantly below peer/historical avg | Not yet implemented | ⚪ |
+| **Correlation Alert** | Portfolio avg correlation >0.7 | Not yet implemented | ⚪ |
+| **Configurable Thresholds** | All alert thresholds via config (currently hardcoded) | Not yet implemented | ⚪ |
+| **Discord Notifications** | Push alerts to Discord channel | Not yet implemented | ⚪ |
 
-**Implementation:**
-```python
-# In brief generator
-from openbb_platform.src.analysis import compute_alerts
+**Remaining effort:** 2-3 hours
 
-alerts = compute_alerts(
-    portfolio_overview=data,
-    technicals=tech_data,
-    thresholds=ALERT_THRESHOLDS
-)
-```
-
-**Effort:** 3-4 hours
-
-**Deliverable:** Automated, threshold-based alerts in brief
+**Deliverable:** Additional alert types, configurable thresholds, Discord notifications
 
 ---
 
-### Phase 4: MCP-Powered Insights (Week 4)
+### Phase 4: MCP-Powered Insights (Week 4) ✅ **COMPLETE** (2026-03-17)
 
 **Goal:** Use MCP server for dynamic analysis
 
+17 MCP tools implemented in `src/mcp_server.py` (plan called for 4):
+
 | MCP Tool | Brief Integration | Status |
 |----------|-------------------|--------|
-| `analyze_symbol()` | Deep dive on top/bottom performers | ⚪ |
-| `compare_peers()` | Peer context for portfolio stocks | ⚪ |
-| `get_daily_report()` | Pre-formatted report sections | ⚪ |
-| `screen_opportunities()` | "Watchlist Opportunities" section | ⚪ |
+| `deep_analyze_symbol()` | Deep dive on top/bottom performers (plan's `analyze_symbol()`) | ✅ |
+| `compare_sector_peers()` | Peer context for portfolio stocks (plan's `compare_peers()`) | ✅ |
+| `get_daily_report()` | Pre-formatted report sections | ✅ |
+| `find_opportunities()` | "Watchlist Opportunities" section (plan's `screen_opportunities()`) | ✅ |
 
-**Example Brief Section:**
-```markdown
-## Deep Dive: NVDA (Top Performer)
-- **Trend:** Above SMA-20, bullish momentum
-- **Valuation:** PE 65x vs. peer avg 45x — premium justified by AI growth
-- **Peer Context:** Outperforming AMD (+2%) and INTC (-5%)
-- **Catalyst:** GTC event this week — monitor for AI announcements
-```
+**Plus 13 additional tools:** `get_portfolio_overview`, `get_price_history`, `get_fundamentals`, `get_sec_filings`, `get_economic_indicators`, `get_watchlist`, `analyze_price_technicals`, `screen_valuations`, `get_portfolio_risk_summary`, `get_macro_snapshot`, `get_sec_activity_summary`, `assess_portfolio_risks`, `list_reports`
 
-**Effort:** 4-6 hours
-
-**Deliverable:** AI-generated insights powered by OpenBB data
+**Deliverable:** AI-generated insights powered by OpenBB data via MCP
 
 ---
 
@@ -231,12 +217,12 @@ Week 4: MCP Integration
 | 2026-03-17 | Phase 1.3: fetcher.py + generate_brief.py + prompt/template wired | ✅ |
 | 2026-03-17 | Phase 1.4: All tests passing (16 + 29 = 45 tests) | ✅ |
 | 2026-03-17 | **Phase 1 complete** | ✅ |
-| TBD | Phase 2 kickoff | ⚪ |
-| TBD | Phase 2 complete | ⚪ |
-| TBD | Phase 3 kickoff | ⚪ |
-| TBD | Phase 3 complete | ⚪ |
-| TBD | Phase 4 kickoff | ⚪ |
-| TBD | Phase 4 complete | ⚪ |
+| 2026-03-17 | Phase 2: All 6 enhanced sections already built in brief_exporter + fetcher | ✅ |
+| 2026-03-17 | **Phase 2 complete** | ✅ |
+| 2026-03-17 | Phase 3: Core alerts implemented in report.py:identify_alerts() | 🟡 |
+| — | Phase 3: Remaining — price/valuation/correlation alerts, config thresholds, Discord | ⚪ |
+| 2026-03-17 | Phase 4: 17 MCP tools implemented in mcp_server.py | ✅ |
+| 2026-03-17 | **Phase 4 complete** | ✅ |
 
 ---
 
@@ -249,9 +235,11 @@ _None_
 ## Next Actions
 
 - [x] ~~Phase 1 complete~~ — All 4 tasks done, 45 tests passing
-- [ ] **Phase 2:** Enhanced Sections — Note: brief_exporter already exports all 6 sections (portfolio snapshot, technicals, valuation, risk, macro, SEC). Consider whether Phase 2 adds deeper analysis or is already covered.
-- [ ] **Phase 3:** Smart Alerts — Note: brief_exporter already includes alerts via `report.identify_alerts()`. Consider whether additional threshold logic is needed.
-- [ ] **Phase 4:** MCP-Powered Insights — Connect MCP tools for dynamic deep dives
+- [x] ~~Phase 2 complete~~ — All 6 enhanced sections built into brief_exporter + fetcher
+- [ ] **Phase 3 (remaining):** Add price movement alert (>5% daily), valuation alert (PE vs peers), correlation alert (>0.7)
+- [ ] **Phase 3 (remaining):** Make alert thresholds configurable (currently hardcoded in `report.py:identify_alerts()`)
+- [ ] **Phase 3 (remaining):** Add Discord notification backend for alerts
+- [x] ~~Phase 4 complete~~ — 17 MCP tools in mcp_server.py
 - [ ] Run a live portfolio brief generation to validate full pipeline with real data
 
 ---
@@ -265,4 +253,4 @@ _None_
 
 ---
 
-*Last updated: 2026-03-17 — Phase 1 complete*
+*Last updated: 2026-03-17 — Phases 1, 2, 4 complete; Phase 3 partial*
