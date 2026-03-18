@@ -25,7 +25,7 @@ from analysis import (
     compute_sec_activity,
     compute_valuation_screen,
 )
-from config import DATA_DIR, DB_PATH, ECONOMIC_INDICATORS, WATCHLIST
+from config import DATA_DIR, ECONOMIC_INDICATORS, WATCHLIST
 from database import Database
 from report import identify_alerts
 
@@ -83,7 +83,7 @@ def _build_technicals(db: Database) -> dict[str, dict]:
     return technicals
 
 
-def _build_sec_activity(days: int = 90) -> dict:
+def _build_sec_activity(db: Database, days: int = 90) -> dict:
     """SEC filing activity summary."""
     placeholders = ", ".join(["?"] * len(ALL_SYMBOLS))
     query = f"""
@@ -92,8 +92,11 @@ def _build_sec_activity(days: int = 90) -> dict:
         WHERE symbol IN ({placeholders})
         ORDER BY filing_date DESC
     """
-    with sqlite3.connect(DB_PATH) as conn:
-        df = pd.read_sql_query(query, conn, params=ALL_SYMBOLS)
+    try:
+        with sqlite3.connect(db.db_path) as conn:
+            df = pd.read_sql_query(query, conn, params=ALL_SYMBOLS)
+    except (pd.errors.DatabaseError, sqlite3.OperationalError):
+        df = pd.DataFrame()
     return compute_sec_activity(df, days)
 
 
@@ -125,7 +128,7 @@ def export_brief_data(output_path: str | Path | None = None) -> dict:
     macro_snapshot = compute_macro_snapshot(histories)
 
     # 6. SEC activity
-    sec_activity = _build_sec_activity(days=90)
+    sec_activity = _build_sec_activity(db, days=90)
 
     # 7. Alerts
     alerts = identify_alerts(

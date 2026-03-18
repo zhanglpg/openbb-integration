@@ -139,13 +139,13 @@ class TestBuildSecActivity:
     def test_returns_dict(self, tmp_db):
         _seed_db(tmp_db)
         with patch("brief_exporter.ALL_SYMBOLS", ["AAPL", "MSFT"]):
-            result = _build_sec_activity(days=365)
+            result = _build_sec_activity(tmp_db, days=365)
         assert isinstance(result, dict)
         assert "per_symbol" in result
 
     def test_empty_db_returns_structure(self, tmp_db):
         with patch("brief_exporter.ALL_SYMBOLS", ["ZZZZ"]):
-            result = _build_sec_activity(days=90)
+            result = _build_sec_activity(tmp_db, days=90)
         assert isinstance(result, dict)
 
 
