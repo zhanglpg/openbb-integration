@@ -66,7 +66,7 @@ def _load_sec_filings(symbol: str) -> pd.DataFrame:
     return pd.read_parquet(files[-1])
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def run_deep_analysis(symbol: str, _db):
     """Cached deep analysis for a symbol with peer context."""
     category, peers = _find_peer_category(symbol)
@@ -108,6 +108,35 @@ def run_deep_analysis(symbol: str, _db):
     # SEC filings as list of dicts
     sec_list = sec_df.to_dict(orient="records") if not sec_df.empty else []
 
+    # SEC enrichment — timeline, days since last, recent 8-K events
+    sec_enriched = {}
+    if not sec_df.empty:
+        sec_sorted = sec_df.sort_values("filing_date", ascending=False)
+        most_recent_date = pd.to_datetime(sec_sorted["filing_date"].iloc[0])
+        sec_enriched["days_since_last"] = (pd.Timestamp.now() - most_recent_date).days
+
+        timeline_rows = sec_sorted.head(10)
+        sec_enriched["timeline"] = [
+            {
+                "date": str(r.get("filing_date", "")),
+                "type": r.get("report_type", ""),
+                "description": r.get("primary_doc_description", ""),
+                "url": r.get("report_url", ""),
+            }
+            for r in timeline_rows.to_dict(orient="records")
+        ]
+
+        eight_k = sec_sorted[sec_sorted["report_type"] == "8-K"].head(5)
+        sec_enriched["recent_8k"] = [
+            {
+                "date": str(r.get("filing_date", "")),
+                "description": r.get("primary_doc_description", ""),
+                "items": r.get("items", ""),
+                "url": r.get("report_url", ""),
+            }
+            for r in eight_k.to_dict(orient="records")
+        ]
+
     # Deep analysis
     deep = analyze_symbol_deep(
         symbol,
@@ -143,6 +172,7 @@ def run_deep_analysis(symbol: str, _db):
         "peers": peers,
         "macro_risk": macro_risk,
         "opportunities": opportunities,
+        "sec_enriched": sec_enriched,
     }
 
 
@@ -224,6 +254,56 @@ def fetch_balance(symbol: str, period: str = "annual") -> pd.DataFrame:
 @st.cache_data(ttl=3600, show_spinner="Loading cash flow...")
 def fetch_cashflow(symbol: str, period: str = "annual") -> pd.DataFrame:
     return DataFetcher().fetch_cash_flow(symbol, period=period)
+
+
+@st.cache_data(ttl=3600)
+def _fill_fundamental_gaps(
+    symbol: str,
+    needs_revenue: bool,
+    needs_fcf: bool,
+    needs_eps: bool,
+    needs_div: bool,
+    needs_pb: bool,
+) -> dict:
+    """Fetch missing fundamental fields from income/cashflow/yfinance (cached 1hr)."""
+    result = {}
+    eps_from_statement = False
+
+    if needs_revenue or needs_eps:
+        inc_df = fetch_income(symbol)
+        if not inc_df.empty and "period_ending" in inc_df.columns:
+            latest_inc = inc_df.sort_values("period_ending").iloc[-1]
+            if needs_revenue and "total_revenue" in inc_df.columns:
+                result["revenue"] = _get_col(latest_inc, "total_revenue")
+            if needs_eps and "diluted_earnings_per_share" in inc_df.columns:
+                result["eps"] = _get_col(latest_inc, "diluted_earnings_per_share")
+                eps_from_statement = True
+
+    if needs_fcf:
+        cf_df = fetch_cashflow(symbol)
+        if not cf_df.empty and "period_ending" in cf_df.columns:
+            latest_cf = cf_df.sort_values("period_ending").iloc[-1]
+            if "free_cash_flow" in cf_df.columns:
+                result["free_cash_flow"] = _get_col(latest_cf, "free_cash_flow")
+
+    if needs_div or needs_pb:
+        try:
+            import yfinance as yf
+
+            info = yf.Ticker(symbol).info
+            if needs_div:
+                dy = info.get("dividendYield")
+                if dy is not None:
+                    result["dividend_yield"] = dy / 100
+            if needs_pb:
+                pb = info.get("priceToBook")
+                if pb is not None:
+                    result["pb_ratio"] = pb
+        except Exception:
+            pass
+
+    result["_eps_from_statement"] = eps_from_statement
+    return result
 
 
 @st.cache_data(ttl=86400)
@@ -1342,6 +1422,15 @@ def main():
             [data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
             [data-testid="column"] { min-width: 0 !important; padding: 0 4px !important; }
         }
+        @media (max-width: 768px) {
+            [data-testid="stHorizontalBlock"] {
+                flex-wrap: wrap !important;
+            }
+            [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+                flex: 0 0 48% !important;
+                min-width: 48% !important;
+            }
+        }
         @media (max-width: 480px) {
             [data-testid="stMetricValue"] { font-size: 0.95rem !important; }
             [data-testid="stMetricLabel"] { font-size: 0.7rem !important; }
@@ -1496,39 +1585,19 @@ def main():
         # while DB fundamentals (pe, eps, market_cap) are in *trading* currency (USD).
         eps_from_statement = False
         if fund:
-            if fund.get("revenue") is None or fund.get("free_cash_flow") is None:
-                inc_df = fetch_income(symbol)
-                if not inc_df.empty and "period_ending" in inc_df.columns:
-                    latest_inc = inc_df.sort_values("period_ending").iloc[-1]
-                    if fund.get("revenue") is None and "total_revenue" in inc_df.columns:
-                        fund["revenue"] = _get_col(latest_inc, "total_revenue")
-                    if fund.get("eps") is None and "diluted_earnings_per_share" in inc_df.columns:
-                        fund["eps"] = _get_col(latest_inc, "diluted_earnings_per_share")
-                        eps_from_statement = True
-            if fund.get("free_cash_flow") is None:
-                cf_df = fetch_cashflow(symbol)
-                if not cf_df.empty and "period_ending" in cf_df.columns:
-                    latest_cf = cf_df.sort_values("period_ending").iloc[-1]
-                    if "free_cash_flow" in cf_df.columns:
-                        fund["free_cash_flow"] = _get_col(latest_cf, "free_cash_flow")
-            if fund.get("dividend_yield") is None or fund.get("pb_ratio") is None:
-                try:
-                    import yfinance as yf
-
-                    info = yf.Ticker(symbol).info
-                    if fund.get("dividend_yield") is None:
-                        # Use dividendYield (a percentage, e.g. 0.78 = 0.78%)
-                        # NOT trailingAnnualDividendYield which divides
-                        # foreign-currency dividends by USD price for ADRs
-                        dy = info.get("dividendYield")
-                        if dy is not None:
-                            fund["dividend_yield"] = dy / 100
-                    if fund.get("pb_ratio") is None:
-                        pb = info.get("priceToBook")
-                        if pb is not None:
-                            fund["pb_ratio"] = pb
-                except Exception:
-                    pass
+            needs_revenue = fund.get("revenue") is None
+            needs_fcf = fund.get("free_cash_flow") is None
+            needs_eps = fund.get("eps") is None
+            needs_div = fund.get("dividend_yield") is None
+            needs_pb = fund.get("pb_ratio") is None
+            if any([needs_revenue, needs_fcf, needs_eps, needs_div, needs_pb]):
+                gaps = _fill_fundamental_gaps(
+                    symbol, needs_revenue, needs_fcf, needs_eps, needs_div, needs_pb
+                )
+                eps_from_statement = gaps.pop("_eps_from_statement", False)
+                for k, v in gaps.items():
+                    if fund.get(k) is None:
+                        fund[k] = v
 
         if not fund or all(v is None for v in fund.values()):
             st.info("No fundamental data available for this symbol")
@@ -1563,126 +1632,161 @@ def main():
 
         st.divider()
 
-        # Section 4: Peer Comparison
-        st.subheader(f"Peer Comparison — {category.title() if category else 'N/A'}")
-        if category and len(peers) > 1:
-            rankings = peer_ctx.get("rankings", {})
-            rank_cols = st.columns(3)
-            for col, (label, key) in zip(
-                rank_cols,
-                [
-                    ("By Return", "by_return"),
-                    ("By Volatility (lowest first)", "by_volatility_asc"),
-                    ("By PE (lowest first)", "by_pe_asc"),
-                ],
-            ):
-                with col:
-                    st.markdown(f"**{label}**")
-                    ranked = rankings.get(key, [])
-                    if ranked:
-                        for rank, sym in enumerate(ranked, 1):
-                            marker = " **<-**" if sym == symbol else ""
-                            st.text(f"{rank}. {sym}{marker}")
-                    else:
-                        st.text("No data")
+        # Section 4: Peer Comparison (expander, default open)
+        with st.expander(
+            f"Peer Comparison — {category.title() if category else 'N/A'}",
+            expanded=True,
+        ):
+            if category and len(peers) > 1:
+                rankings = peer_ctx.get("rankings", {})
+                rank_cols = st.columns(3)
+                for col, (label, key) in zip(
+                    rank_cols,
+                    [
+                        ("By Return", "by_return"),
+                        ("By Volatility (lowest first)", "by_volatility_asc"),
+                        ("By PE (lowest first)", "by_pe_asc"),
+                    ],
+                ):
+                    with col:
+                        ranked = rankings.get(key, [])
+                        if ranked:
+                            rank_df = pd.DataFrame(
+                                {
+                                    "Rank": range(1, len(ranked) + 1),
+                                    "Symbol": ranked,
+                                    "": ["<-" if s == symbol else "" for s in ranked],
+                                }
+                            )
+                            st.markdown(f"**{label}**")
+                            st.dataframe(
+                                rank_df, hide_index=True, height=min(len(ranked) * 35 + 38, 250)
+                            )
+                        else:
+                            st.markdown(f"**{label}**")
+                            st.caption("No data")
 
-            peer_tech = peer_ctx.get("technicals", [])
-            if peer_tech:
-                st.markdown("**Peer Technicals**")
-                tech_df = pd.DataFrame(peer_tech)
-                rename = {
-                    "symbol": "Symbol",
-                    "total_return_pct": "Return %",
-                    "daily_volatility": "Volatility",
-                    "max_drawdown_pct": "Max DD %",
-                    "price_vs_sma20": "vs SMA-20",
-                    "volume_trend_ratio": "Vol Trend",
-                }
-                tech_df = tech_df.rename(columns=rename)
-                st.dataframe(tech_df, hide_index=True)
-        else:
-            st.info("No peer group found for this symbol")
-
-        st.divider()
-
-        # Section 5: SEC Filing Summary
-        st.subheader("SEC Filing Summary")
-        sec = deep.get("sec_summary", {})
-        total = sec.get("total_filings", 0)
-        if total == 0:
-            st.info("No SEC filings on record")
-        else:
-            st.metric("Total Filings", total)
-            by_type = sec.get("by_type", {})
-            if by_type:
-                st.markdown("**Filings by Type**")
-                type_df = pd.DataFrame(
-                    [{"Type": k, "Count": v} for k, v in sorted(by_type.items())]
-                )
-                st.dataframe(type_df, hide_index=True)
-            most_recent = sec.get("most_recent")
-            if most_recent:
-                st.markdown("**Most Recent Filing**")
-                mr_cols = st.columns(3)
-                mr_cols[0].metric("Type", most_recent.get("report_type", "N/A"))
-                mr_cols[1].metric("Date", str(most_recent.get("filing_date", "N/A")))
-                url = most_recent.get("report_url")
-                if url:
-                    mr_cols[2].markdown(f"[View Filing]({url})")
-
-        st.divider()
-
-        # Section 6: Macro Risk Context
-        st.subheader("Macro Risk Context")
-        macro_risk = result.get("macro_risk")
-        if macro_risk:
-            risk_level = macro_risk.get("overall_risk_level", "unknown")
-            risk_colors = {"low": "normal", "moderate": "off", "elevated": "off", "high": "inverse"}
-            st.metric(
-                "Overall Risk Level",
-                risk_level.upper(),
-                delta_color=risk_colors.get(risk_level, "normal"),
-            )
-
-            macro_env = macro_risk.get("macro_environment", {})
-            env_cols = st.columns(3)
-            env_cols[0].metric("Yield Curve", (macro_env.get("yield_curve") or "N/A").title())
-            env_cols[1].metric("VIX Regime", (macro_env.get("vix_regime") or "N/A").title())
-            env_cols[2].metric("Rate Direction", (macro_env.get("rate_direction") or "N/A").title())
-
-            concerns = macro_risk.get("concerns", [])
-            for concern in concerns:
-                factor = concern["factor"].replace("_", " ").title()
-                msg = f"**{factor}** ({concern['status']}): {concern['impact']}"
-                st.warning(msg)
-        else:
-            st.info("No macro data available — run the economic pipeline to populate")
-
-        st.divider()
-
-        # Section 7: Opportunity Score
-        st.subheader("Opportunity Score")
-        opportunities = result.get("opportunities", [])
-        sym_opp = [o for o in opportunities if o.get("symbol") == symbol]
-        if sym_opp:
-            opp = sym_opp[0]
-            st.metric("Score", f"{opp['score']}/10")
-            for reason in opp.get("reasons", []):
-                st.success(reason)
-        else:
-            other_opps = opportunities[:3]
-            if other_opps:
-                st.info(f"No opportunity signal for {symbol} at current criteria")
-                st.markdown("**Top opportunities in watchlist:**")
-                for o in other_opps:
-                    st.text(f"  {o['symbol']} (score {o['score']}): {', '.join(o['reasons'])}")
+                peer_tech = peer_ctx.get("technicals", [])
+                if peer_tech:
+                    st.markdown("**Peer Technicals**")
+                    tech_df = pd.DataFrame(peer_tech)
+                    rename = {
+                        "symbol": "Symbol",
+                        "total_return_pct": "Return %",
+                        "daily_volatility": "Volatility",
+                        "max_drawdown_pct": "Max DD %",
+                        "price_vs_sma20": "vs SMA-20",
+                        "volume_trend_ratio": "Vol Trend",
+                    }
+                    tech_df = tech_df.rename(columns=rename)
+                    st.dataframe(tech_df, hide_index=True)
             else:
-                st.info("No opportunities identified across watchlist")
+                st.info("No peer group found for this symbol")
 
-        st.divider()
+        # Section 5: SEC Filing Summary (expander, default open)
+        with st.expander("SEC Filing Summary", expanded=True):
+            sec = deep.get("sec_summary", {})
+            sec_enriched = result.get("sec_enriched", {})
+            total = sec.get("total_filings", 0)
+            if total == 0:
+                st.info("No SEC filings on record")
+            else:
+                # Top metrics row
+                sec_m1, sec_m2 = st.columns(2)
+                sec_m1.metric("Total Filings", total)
+                days_since = sec_enriched.get("days_since_last")
+                sec_m2.metric(
+                    "Days Since Last Filing",
+                    days_since if days_since is not None else "N/A",
+                )
 
-        # Section 8: Research Notes
-        _render_research_notes(symbol, db)
+                # Filings by type
+                by_type = sec.get("by_type", {})
+                if by_type:
+                    st.markdown("**Filings by Type**")
+                    type_df = pd.DataFrame(
+                        [{"Type": k, "Count": v} for k, v in sorted(by_type.items())]
+                    )
+                    st.dataframe(type_df, hide_index=True, height=min(len(type_df) * 35 + 38, 250))
+
+                # Recent filings timeline
+                timeline = sec_enriched.get("timeline", [])
+                if timeline:
+                    st.markdown("**Recent Filings**")
+                    for f in timeline:
+                        ftype = f["type"]
+                        url = f.get("url")
+                        desc = f.get("description") or ""
+                        type_str = f"[{ftype}]({url})" if url else ftype
+                        desc_str = f" — {desc}" if desc else ""
+                        st.markdown(f"- **{f['date']}** {type_str}{desc_str}")
+
+                # Recent 8-K events
+                recent_8k = sec_enriched.get("recent_8k", [])
+                if recent_8k:
+                    st.markdown("**Recent 8-K Events**")
+                    for ev in recent_8k:
+                        items_str = f" | Items: {ev['items']}" if ev.get("items") else ""
+                        desc = ev.get("description") or ""
+                        url = ev.get("url")
+                        link = f" — [View]({url})" if url else ""
+                        st.markdown(f"- **{ev['date']}** {desc}{items_str}{link}")
+
+        # Section 6: Macro Risk Context (expander, default closed)
+        with st.expander("Macro Risk Context", expanded=False):
+            macro_risk = result.get("macro_risk")
+            if macro_risk:
+                risk_level = macro_risk.get("overall_risk_level", "unknown")
+                risk_colors = {
+                    "low": "normal",
+                    "moderate": "off",
+                    "elevated": "off",
+                    "high": "inverse",
+                }
+                st.metric(
+                    "Overall Risk Level",
+                    risk_level.upper(),
+                    delta_color=risk_colors.get(risk_level, "normal"),
+                )
+
+                macro_env = macro_risk.get("macro_environment", {})
+                env_cols = st.columns(3)
+                env_cols[0].metric("Yield Curve", (macro_env.get("yield_curve") or "N/A").title())
+                env_cols[1].metric("VIX Regime", (macro_env.get("vix_regime") or "N/A").title())
+                env_cols[2].metric(
+                    "Rate Direction", (macro_env.get("rate_direction") or "N/A").title()
+                )
+
+                concerns = macro_risk.get("concerns", [])
+                for concern in concerns:
+                    factor = concern["factor"].replace("_", " ").title()
+                    msg = f"**{factor}** ({concern['status']}): {concern['impact']}"
+                    st.warning(msg)
+            else:
+                st.info("No macro data available — run the economic pipeline to populate")
+
+        # Section 7: Opportunity Score (expander, default closed)
+        with st.expander("Opportunity Score", expanded=False):
+            opportunities = result.get("opportunities", [])
+            sym_opp = [o for o in opportunities if o.get("symbol") == symbol]
+            if sym_opp:
+                opp = sym_opp[0]
+                st.metric("Score", f"{opp['score']}/10")
+                for reason in opp.get("reasons", []):
+                    st.success(reason)
+            else:
+                other_opps = opportunities[:3]
+                if other_opps:
+                    st.info(f"No opportunity signal for {symbol} at current criteria")
+                    st.markdown("**Top opportunities in watchlist:**")
+                    for o in other_opps:
+                        st.text(f"  {o['symbol']} (score {o['score']}): {', '.join(o['reasons'])}")
+                else:
+                    st.info("No opportunities identified across watchlist")
+
+        # Section 8: Research Notes (expander, default closed)
+        with st.expander("Research Notes", expanded=False):
+            _render_research_notes(symbol, db)
 
     # =====================================================================
     # TAB: Financial Statements
