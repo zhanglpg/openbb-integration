@@ -16,6 +16,7 @@ from shared import (  # must be first: adds src/ to sys.path
     DOWN_COLOR,
     UP_COLOR,
     apply_chart_defaults,
+    chart_config,
     get_data_freshness,
     get_db,
     inject_global_css,
@@ -88,6 +89,12 @@ def get_economic_indicators(_db) -> pd.DataFrame:
     """Get latest economic indicators (delegates to Database method)."""
     key_indicators = ["VIXCLS", "DGS10", "T10Y2Y", "FEDFUNDS"]
     return _db.get_latest_economic_indicators(key_indicators)
+
+
+@st.cache_data(ttl=60)
+def get_holdings(_db) -> pd.DataFrame:
+    """Get portfolio holdings (symbol + shares)."""
+    return _db.get_holdings()
 
 
 @st.cache_data(ttl=3600)
@@ -203,6 +210,135 @@ def main():
             st.warning("⚠️ No price data available. Click 'Refresh Data' to fetch.")
     else:
         st.warning("⚠️ No price data available. Click 'Refresh Data' to fetch.")
+
+    st.divider()
+
+    # =========================================================================
+    # PORTFOLIO ALLOCATION
+    # =========================================================================
+    st.subheader("Portfolio Allocation")
+
+    # Build holdings editor: one row per watchlist symbol
+    holdings_df = get_holdings(db)
+    held = dict(zip(holdings_df["symbol"], holdings_df["shares"])) if not holdings_df.empty else {}
+
+    editor_data = pd.DataFrame(
+        {"Symbol": ALL_SYMBOLS, "Shares": [held.get(s, 0.0) for s in ALL_SYMBOLS]}
+    )
+
+    with st.expander("Edit Holdings"):
+        edited = st.data_editor(
+            editor_data,
+            column_config={
+                "Symbol": st.column_config.TextColumn(disabled=True),
+                "Shares": st.column_config.NumberColumn(min_value=0, step=1, format="%.2f"),
+            },
+            hide_index=True,
+            key="holdings_editor",
+        )
+        # Persist any changes
+        for _, row in edited.iterrows():
+            sym, shares = row["Symbol"], row["Shares"]
+            if shares != held.get(sym, 0.0):
+                db.update_holding(sym, shares)
+                st.cache_data.clear()
+                st.rerun()
+
+    # Build allocation chart from holdings × latest prices
+    active_holdings = edited[edited["Shares"] > 0].copy()
+
+    if not active_holdings.empty and not prices_with_change.empty:
+        # Look up latest price per symbol
+        latest_prices = {}
+        for symbol in active_holdings["Symbol"]:
+            sym_df = prices_with_change[prices_with_change["symbol"] == symbol]
+            if not sym_df.empty:
+                latest_prices[symbol] = sym_df.iloc[0]["close"]
+
+        active_holdings["Price"] = active_holdings["Symbol"].map(latest_prices)
+        active_holdings = active_holdings.dropna(subset=["Price"])
+        active_holdings["Market Value"] = active_holdings["Shares"] * active_holdings["Price"]
+
+        if not active_holdings.empty and active_holdings["Market Value"].sum() > 0:
+            total_value = active_holdings["Market Value"].sum()
+            st.metric("Total Portfolio Value", f"${total_value:,.2f}")
+
+            # Sector mapping
+            active_holdings["Sector"] = active_holdings["Symbol"].apply(
+                lambda s: next((sec for sec, syms in PORTFOLIO.items() if s in syms), "Other")
+            )
+
+            view_mode = st.radio(
+                "View by", ["Sector", "Symbol"], horizontal=True, key="allocation_view"
+            )
+
+            # Professional muted palette (Bloomberg / institutional style)
+            _ALLOC_PALETTE = [
+                "#3A5BA0",  # navy blue
+                "#5B8DBE",  # steel blue
+                "#6B9A7B",  # sage green
+                "#8C7AA9",  # muted purple
+                "#C4956A",  # warm tan
+                "#7A9EAF",  # slate teal
+                "#A0766E",  # dusty rose
+                "#6E8B99",  # blue-grey
+                "#9AAF8C",  # olive sage
+                "#B08EA2",  # mauve
+                "#7B9BAD",  # cadet blue
+                "#A89A6F",  # sand
+            ]
+            sector_colors = {
+                "Tech": _ALLOC_PALETTE[0],
+                "China": _ALLOC_PALETTE[4],
+                "Semiconductors": _ALLOC_PALETTE[2],
+                "Etfs": _ALLOC_PALETTE[3],
+                "Other": _ALLOC_PALETTE[7],
+            }
+
+            if view_mode == "Sector":
+                grouped = (
+                    active_holdings.groupby("Sector")["Market Value"]
+                    .sum()
+                    .sort_values(ascending=True)
+                    .reset_index()
+                )
+                grouped["Pct"] = grouped["Market Value"] / total_value * 100
+                labels = grouped["Sector"].tolist()
+                values = grouped["Market Value"].tolist()
+                pcts = grouped["Pct"].tolist()
+                colors = [sector_colors.get(s, _ALLOC_PALETTE[7]) for s in labels]
+            else:
+                sorted_h = active_holdings.sort_values("Market Value", ascending=True)
+                sorted_h["Pct"] = sorted_h["Market Value"] / total_value * 100
+                labels = sorted_h["Symbol"].tolist()
+                values = sorted_h["Market Value"].tolist()
+                pcts = sorted_h["Pct"].tolist()
+                colors = [_ALLOC_PALETTE[i % len(_ALLOC_PALETTE)] for i in range(len(labels))]
+
+            fig = go.Figure(
+                go.Bar(
+                    y=labels,
+                    x=values,
+                    orientation="h",
+                    marker=dict(color=colors, line=dict(width=0)),
+                    text=[f"${v:,.0f}  ({p:.1f}%)" for v, p in zip(values, pcts)],
+                    textposition="auto",
+                    textfont=dict(color="#FAFAFA", size=12),
+                    hovertemplate="%{y}<br>$%{x:,.2f}<br><extra></extra>",
+                )
+            )
+            fig.update_layout(
+                height=max(280, len(labels) * 38 + 60),
+                xaxis=dict(title="Market Value ($)", showgrid=True, gridcolor="#2a2a2a"),
+                yaxis=dict(title=""),
+                margin=dict(l=10, r=20, t=10, b=40),
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True, config=chart_config())
+        else:
+            st.info("Enter share counts above to see portfolio allocation.")
+    else:
+        st.info("Enter share counts above to see portfolio allocation.")
 
     st.divider()
 

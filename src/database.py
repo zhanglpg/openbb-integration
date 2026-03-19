@@ -170,6 +170,17 @@ class Database:
             """)
 
             # ----------------------------------------------------------
+            # Holdings — shares per symbol for portfolio allocation
+            # ----------------------------------------------------------
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS holdings (
+                    symbol TEXT PRIMARY KEY,
+                    shares REAL NOT NULL DEFAULT 0,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # ----------------------------------------------------------
             # Research notes
             # ----------------------------------------------------------
             conn.execute("""
@@ -734,6 +745,29 @@ class Database:
         """Delete a research note by ID."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("DELETE FROM research_notes WHERE id = ?", (int(note_id),))
+            conn.commit()
+
+    # ------------------------------------------------------------------
+    # Holdings
+    # ------------------------------------------------------------------
+
+    def get_holdings(self) -> pd.DataFrame:
+        """Get all holdings (symbol + shares)."""
+        query = "SELECT symbol, shares FROM holdings WHERE shares > 0 ORDER BY symbol"
+        with sqlite3.connect(self.db_path) as conn:
+            return pd.read_sql_query(query, conn)
+
+    def update_holding(self, symbol: str, shares: float):
+        """Insert or update shares for a symbol."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """INSERT INTO holdings (symbol, shares, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(symbol) DO UPDATE SET
+                       shares = excluded.shares,
+                       updated_at = excluded.updated_at""",
+                (symbol, shares),
+            )
             conn.commit()
 
 
