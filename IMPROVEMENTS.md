@@ -8,25 +8,20 @@
 
 ## 🎯 High-Impact Improvements (Quick Wins)
 
-### 1. Data Freshness Indicators 🔴 **HIGH PRIORITY**
+### 1. Data Freshness Indicators ✅ **DONE**
 
-**Current:** No visibility into when data was last updated
+**Implemented:** Color-coded staleness indicators in sidebar and page footers.
+- 🟢 Green = <1 hour (fresh)
+- 🟡 Yellow/Orange = 1-24 hours
+- 🔴 Red = >24 hours (stale)
+- Relative time display ("5m ago", "3h ago", "2d ago")
+- Per-data-type tracking (prices, fundamentals, SEC, economic)
 
-**Proposed:**
-- "Last updated: 2 hours ago" badge on each page/widget
-- Color-coded staleness:
-  - 🟢 Green = <1 hour (fresh)
-  - 🟡 Yellow = 1-24 hours
-  - 🔴 Red = >24 hours (stale)
-- Manual refresh button per widget
-
-**Effort:** 1-2 hours  
-**Impact:** Critical for trading decisions — users need to know if data is stale
-
-**Files to modify:**
-- `dashboard.py` — Add freshness badge to portfolio table
-- `pages/2_Economy.py` — Add last-updated timestamps
-- `shared.py` — Add `get_data_freshness()` helper
+**Files modified:**
+- `shared.py` — `_time_ago()`, `_freshness_color()`, `get_data_freshness()`, `render_freshness_sidebar()`
+- `dashboard.py` — Freshness timestamp in footer
+- `pages/2_Economy.py` — Freshness timestamp in footer
+- `tests/test_freshness.py` — 16 test cases covering boundary conditions
 
 ---
 
@@ -204,8 +199,8 @@
 
 | Priority | Improvement | Effort | Impact | Status |
 |----------|-------------|--------|--------|--------|
-| **1** | Data Freshness Indicators | 1-2h | 🔴 High | ⚪ Backlog |
-| **2** | Portfolio Allocation Pie Chart | 2-3h | 🔴 High | ⚪ Backlog |
+| **1** | Data Freshness Indicators | 1-2h | 🔴 High | ✅ Done |
+| **2** | Portfolio Allocation Pie Chart | 2-3h | 🔴 High | 🔵 In Progress |
 | **3** | Technical Indicators (RSI, MACD) | 3-4h | 🟡 Medium | ⚪ Backlog |
 | **4** | Event Calendar (Economy) | 2-3h | 🟡 Medium | ⚪ Backlog |
 | **5** | Export Options (Reports) | 3-4h | 🟡 Medium | ⚪ Backlog |
@@ -220,7 +215,7 @@
 
 ## 📝 Notes
 
-- **Quick wins first:** Start with data freshness (1-2h) — high impact, low effort
+- **Quick wins first:** Data freshness done; now working on portfolio allocation pie chart
 - **User feedback:** Track which features get used most before investing in advanced features
 - **Mobile responsiveness:** All pages are desktop-first; consider responsive CSS if iPad usage increases
 

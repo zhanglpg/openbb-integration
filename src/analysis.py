@@ -304,11 +304,13 @@ def compute_valuation_screen(
     # Compute derived metrics
     if "free_cash_flow" in df.columns and "market_cap" in df.columns:
         df["fcf_yield"] = df.apply(
-            lambda r: round(r["free_cash_flow"] / r["market_cap"], 4)
-            if pd.notna(r.get("free_cash_flow"))
-            and pd.notna(r.get("market_cap"))
-            and r["market_cap"] != 0
-            else None,
+            lambda r: (
+                round(r["free_cash_flow"] / r["market_cap"], 4)
+                if pd.notna(r.get("free_cash_flow"))
+                and pd.notna(r.get("market_cap"))
+                and r["market_cap"] != 0
+                else None
+            ),
             axis=1,
         )
     else:
@@ -807,10 +809,14 @@ def summarize_insider_activity(trades_df: pd.DataFrame) -> dict:
     if shares_col and acq_col:
         df["_signed_shares"] = df.apply(
             lambda r: (
-                r[shares_col] if str(r.get(acq_col, "")).upper().startswith("A") else -r[shares_col]
-            )
-            if pd.notna(r.get(shares_col))
-            else 0,
+                (
+                    r[shares_col]
+                    if str(r.get(acq_col, "")).upper().startswith("A")
+                    else -r[shares_col]
+                )
+                if pd.notna(r.get(shares_col))
+                else 0
+            ),
             axis=1,
         )
         net_shares = int(df["_signed_shares"].sum())
