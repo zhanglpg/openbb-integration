@@ -3,12 +3,15 @@ Economy Dashboard Page
 Macroeconomic indicators and trends via OpenBB
 """
 
-from datetime import datetime  # noqa: I001
-
-import pandas as pd
+import pandas as pd  # noqa: I001
 import streamlit as st
 
-from shared import get_db, inject_global_css, render_sidebar_controls  # must be first
+from shared import (  # must be first
+    get_data_freshness,
+    get_db,
+    inject_global_css,
+    render_sidebar_controls,
+)
 
 from config import ECONOMIC_INDICATORS
 from economic_dashboard import EconomicDashboard
@@ -219,10 +222,13 @@ def main():
     # FOOTER
     # =========================================================================
     st.divider()
-    st.caption(
-        f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
-        f"Data source: OpenBB (FRED, World Bank)"
-    )
+    freshness = get_data_freshness(db)
+    econ_ts = freshness.get("economic")
+    if econ_ts:
+        synced_str = econ_ts.strftime("%Y-%m-%d %H:%M:%S UTC")
+    else:
+        synced_str = "never"
+    st.caption(f"Data last synced: {synced_str} | Data source: OpenBB (FRED, World Bank)")
 
 
 main()

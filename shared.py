@@ -1,6 +1,7 @@
 """Shared utilities for multi-page Streamlit dashboard."""
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Add src to path for all pages
@@ -121,6 +122,89 @@ def get_db():
     return Database()
 
 
+def _time_ago(dt: datetime) -> str:
+    """Return a human-readable relative time string."""
+    now = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    delta = now - dt
+    seconds = int(delta.total_seconds())
+    if seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    days = hours // 24
+    return f"{days}d ago"
+
+
+def _freshness_color(dt: datetime) -> str:
+    """Return a color hex based on data staleness."""
+    now = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    hours = (now - dt).total_seconds() / 3600
+    if hours < 1:
+        return "#26a69a"  # green — fresh
+    elif hours < 24:
+        return "#FF9800"  # orange — aging
+    return "#ef5350"  # red — stale
+
+
+@st.cache_data(ttl=60)
+def get_data_freshness(_db) -> dict:
+    """Query fetch_log for the most recent successful fetch per data type.
+
+    Returns a dict mapping data_type -> datetime (UTC) or None.
+    """
+    import sqlite3
+
+    freshness: dict[str, datetime | None] = {}
+    data_types = ["prices", "fundamentals", "sec_filings", "economic"]
+    try:
+        with sqlite3.connect(_db.db_path) as conn:
+            for dt in data_types:
+                row = conn.execute(
+                    "SELECT MAX(fetch_date) FROM fetch_log "
+                    "WHERE data_type = ? AND status = 'success'",
+                    (dt,),
+                ).fetchone()
+                if row and row[0]:
+                    freshness[dt] = datetime.fromisoformat(row[0])
+                else:
+                    freshness[dt] = None
+    except Exception:
+        for dt in data_types:
+            freshness.setdefault(dt, None)
+    return freshness
+
+
+def render_freshness_sidebar(_db) -> None:
+    """Render data freshness status in the sidebar."""
+    freshness = get_data_freshness(_db)
+    labels = {
+        "prices": "Prices",
+        "fundamentals": "Fundamentals",
+        "sec_filings": "SEC Filings",
+        "economic": "Economic",
+    }
+    lines = []
+    for key, label in labels.items():
+        dt = freshness.get(key)
+        if dt is None:
+            lines.append(f":{label} — :gray[never synced]")
+        else:
+            color = _freshness_color(dt)
+            ago = _time_ago(dt)
+            # Use inline HTML for colored dot
+            lines.append(f'<span style="color:{color}">●</span> {label} — {ago}')
+    st.sidebar.markdown("**Data Freshness**")
+    st.sidebar.markdown("<br>".join(lines), unsafe_allow_html=True)
+
+
 def render_sidebar_controls():
     """Render shared sidebar controls (Refresh Data, Reset Cache)."""
     st.sidebar.header("Controls")
@@ -140,5 +224,8 @@ def render_sidebar_controls():
         if st.button("🔃 Reset Cache", width="stretch"):
             st.cache_data.clear()
             st.rerun()
+
+    # Show data freshness below controls
+    render_freshness_sidebar(get_db())
 
     st.sidebar.divider()

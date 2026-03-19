@@ -5,7 +5,6 @@ Real-time portfolio monitoring with OpenBB data pipeline
 """
 
 import json  # noqa: I001
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -17,6 +16,7 @@ from shared import (  # must be first: adds src/ to sys.path
     DOWN_COLOR,
     UP_COLOR,
     apply_chart_defaults,
+    get_data_freshness,
     get_db,
     inject_global_css,
     render_sidebar_controls,
@@ -320,9 +320,14 @@ def main():
     # FOOTER
     # =========================================================================
     st.divider()
+    freshness = get_data_freshness(db)
+    price_ts = freshness.get("prices")
+    if price_ts:
+        synced_str = price_ts.strftime("%Y-%m-%d %H:%M:%S UTC")
+    else:
+        synced_str = "never"
     st.caption(
-        f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
-        f"Data source: OpenBB (Yahoo Finance, FRED, SEC EDGAR)"
+        f"Data last synced: {synced_str} | Data source: OpenBB (Yahoo Finance, FRED, SEC EDGAR)"
     )
 
 
