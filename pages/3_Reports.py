@@ -8,7 +8,7 @@ import sys
 
 import streamlit as st
 
-from shared import render_sidebar_controls  # must be first: adds src/ to sys.path
+from shared import inject_global_css, render_sidebar_controls  # adds src/ to sys.path
 from config import REPORTS_DIR
 
 
@@ -32,6 +32,7 @@ def main():
     st.title("Daily Market Reports")
     st.markdown("**Automated daily briefings** | OpenClaw Financial Intelligence")
 
+    inject_global_css()
     render_sidebar_controls()
 
     available = get_available_reports()

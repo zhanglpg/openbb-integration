@@ -11,7 +11,16 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from shared import get_db, render_sidebar_controls  # must be first: adds src/ to sys.path
+from shared import (  # must be first: adds src/ to sys.path
+    COLORS,
+    DOWN_COLOR,
+    SERIES_COLORS,
+    UP_COLOR,
+    apply_chart_defaults,
+    get_db,
+    inject_global_css,
+    render_sidebar_controls,
+)
 
 from analysis import (
     compute_financial_ratios,
@@ -463,7 +472,7 @@ def _render_income_statement(symbol, df=None, cf_df=None, cur="$"):
                     x=labels,
                     y=df["total_revenue"],
                     name="Revenue",
-                    marker_color="#2196F3",
+                    marker_color=COLORS["blue"],
                 )
             )
         if "net_income" in df.columns:
@@ -472,23 +481,19 @@ def _render_income_statement(symbol, df=None, cf_df=None, cur="$"):
                     x=labels,
                     y=df["net_income"],
                     name="Net Income",
-                    marker_color="#26a69a",
+                    marker_color=UP_COLOR,
                 )
             )
-        fig.update_layout(
-            title="Revenue vs Net Income",
-            barmode="group",
-            height=350,
-            margin=dict(l=40, r=20, t=40, b=30),
-        )
+        fig.update_layout(title="Revenue vs Net Income", barmode="group")
+        apply_chart_defaults(fig)
         st.plotly_chart(fig, use_container_width=True)
 
     with chart_col2:
         fig = go.Figure()
         for col, name, color in [
-            ("gross_profit", "Gross Margin", "#2196F3"),
-            ("operating_income", "Operating Margin", "#FF9800"),
-            ("net_income", "Net Margin", "#26a69a"),
+            ("gross_profit", "Gross Margin", COLORS["blue"]),
+            ("operating_income", "Operating Margin", COLORS["orange"]),
+            ("net_income", "Net Margin", UP_COLOR),
         ]:
             if col in df.columns and "total_revenue" in df.columns:
                 margin = (df[col] / df["total_revenue"].replace(0, pd.NA)) * 100
@@ -501,12 +506,8 @@ def _render_income_statement(symbol, df=None, cf_df=None, cur="$"):
                         line=dict(color=color),
                     )
                 )
-        fig.update_layout(
-            title="Margin Trends (%)",
-            height=350,
-            margin=dict(l=40, r=20, t=40, b=30),
-            yaxis_title="%",
-        )
+        fig.update_layout(title="Margin Trends (%)", yaxis_title="%")
+        apply_chart_defaults(fig)
         st.plotly_chart(fig, use_container_width=True)
 
     # Row 2: EBITDA (GAAP vs Adjusted) | SBC
@@ -520,7 +521,7 @@ def _render_income_statement(symbol, df=None, cf_df=None, cur="$"):
                     x=labels,
                     y=df["ebitda"],
                     name="EBITDA (GAAP)",
-                    marker_color="#2196F3",
+                    marker_color=COLORS["blue"],
                 )
             )
             if has_adj:
@@ -529,15 +530,11 @@ def _render_income_statement(symbol, df=None, cf_df=None, cur="$"):
                         x=labels,
                         y=df["adjusted_ebitda"],
                         name="EBITDA (Adjusted)",
-                        marker_color="#FF9800",
+                        marker_color=COLORS["orange"],
                     )
                 )
-            fig.update_layout(
-                title="EBITDA: GAAP vs Adjusted",
-                barmode="group",
-                height=350,
-                margin=dict(l=40, r=20, t=40, b=30),
-            )
+            fig.update_layout(title="EBITDA: GAAP vs Adjusted", barmode="group")
+            apply_chart_defaults(fig)
             st.plotly_chart(fig, use_container_width=True)
 
         with ebitda_col2:
@@ -548,7 +545,7 @@ def _render_income_statement(symbol, df=None, cf_df=None, cur="$"):
                         x=labels,
                         y=df["stock_based_compensation"],
                         name="SBC",
-                        marker_color="#9C27B0",
+                        marker_color=COLORS["purple"],
                     )
                 )
                 if "total_revenue" in df.columns:
@@ -561,16 +558,15 @@ def _render_income_statement(symbol, df=None, cf_df=None, cur="$"):
                             y=sbc_pct,
                             name="SBC % Rev",
                             mode="lines+markers",
-                            line=dict(color="#E91E63"),
+                            line=dict(color=COLORS["pink"]),
                             yaxis="y2",
                         )
                     )
                 fig.update_layout(
                     title="Stock-Based Compensation",
-                    height=350,
-                    margin=dict(l=40, r=20, t=40, b=30),
                     yaxis2=dict(title="%", overlaying="y", side="right"),
                 )
+                apply_chart_defaults(fig)
                 st.plotly_chart(fig, use_container_width=True)
 
     # Data table
@@ -631,18 +627,14 @@ def _render_balance_sheet(symbol, df=None, cur="$"):
     with chart_col1:
         fig = go.Figure()
         for col, name, color in [
-            ("total_assets", "Assets", "#2196F3"),
-            ("total_liabilities_net_minority_interest", "Liabilities", "#ef5350"),
-            ("total_equity_non_controlling_interests", "Equity", "#26a69a"),
+            ("total_assets", "Assets", COLORS["blue"]),
+            ("total_liabilities_net_minority_interest", "Liabilities", DOWN_COLOR),
+            ("total_equity_non_controlling_interests", "Equity", UP_COLOR),
         ]:
             if col in df.columns:
                 fig.add_trace(go.Bar(x=labels, y=df[col], name=name, marker_color=color))
-        fig.update_layout(
-            title="Assets / Liabilities / Equity",
-            barmode="group",
-            height=350,
-            margin=dict(l=40, r=20, t=40, b=30),
-        )
+        fig.update_layout(title="Assets / Liabilities / Equity", barmode="group")
+        apply_chart_defaults(fig)
         st.plotly_chart(fig, use_container_width=True)
 
     # Debt vs Cash
@@ -655,7 +647,7 @@ def _render_balance_sheet(symbol, df=None, cur="$"):
                     y=df["total_debt"],
                     name="Total Debt",
                     mode="lines+markers",
-                    line=dict(color="#ef5350"),
+                    line=dict(color=DOWN_COLOR),
                 )
             )
         if "cash_and_cash_equivalents" in df.columns:
@@ -665,10 +657,11 @@ def _render_balance_sheet(symbol, df=None, cur="$"):
                     y=df["cash_and_cash_equivalents"],
                     name="Cash",
                     mode="lines+markers",
-                    line=dict(color="#26a69a"),
+                    line=dict(color=UP_COLOR),
                 )
             )
-        fig.update_layout(title="Debt vs Cash", height=350, margin=dict(l=40, r=20, t=40, b=30))
+        fig.update_layout(title="Debt vs Cash")
+        apply_chart_defaults(fig)
         st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("Balance Sheet Data"):
@@ -722,27 +715,24 @@ def _render_cash_flow(symbol, df=None, cur="$"):
     with chart_col1:
         fig = go.Figure()
         for col, name, color in [
-            ("operating_cash_flow", "Operating", "#26a69a"),
-            ("investing_cash_flow", "Investing", "#FF9800"),
-            ("financing_cash_flow", "Financing", "#ef5350"),
+            ("operating_cash_flow", "Operating", UP_COLOR),
+            ("investing_cash_flow", "Investing", COLORS["orange"]),
+            ("financing_cash_flow", "Financing", DOWN_COLOR),
         ]:
             if col in df.columns:
                 fig.add_trace(go.Bar(x=labels, y=df[col], name=name, marker_color=color))
-        fig.update_layout(
-            title="Cash Flow Components",
-            barmode="group",
-            height=350,
-            margin=dict(l=40, r=20, t=40, b=30),
-        )
+        fig.update_layout(title="Cash Flow Components", barmode="group")
+        apply_chart_defaults(fig)
         st.plotly_chart(fig, use_container_width=True)
 
     # FCF trend
     with chart_col2:
         fig = go.Figure()
         if "free_cash_flow" in df.columns:
-            colors = ["#26a69a" if v >= 0 else "#ef5350" for v in df["free_cash_flow"]]
+            colors = [UP_COLOR if v >= 0 else DOWN_COLOR for v in df["free_cash_flow"]]
             fig.add_trace(go.Bar(x=labels, y=df["free_cash_flow"], name="FCF", marker_color=colors))
-        fig.update_layout(title="Free Cash Flow", height=350, margin=dict(l=40, r=20, t=40, b=30))
+        fig.update_layout(title="Free Cash Flow")
+        apply_chart_defaults(fig)
         st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("Cash Flow Data"):
@@ -787,10 +777,10 @@ def _render_ratio_analysis(symbol, income_df=None, balance_df=None, cashflow_df=
     with chart_col1:
         fig = go.Figure()
         for col, name, color in [
-            ("gross_margin", "Gross Margin", "#2196F3"),
-            ("operating_margin", "Operating Margin", "#FF9800"),
-            ("net_margin", "Net Margin", "#26a69a"),
-            ("fcf_margin", "FCF Margin", "#9C27B0"),
+            ("gross_margin", "Gross Margin", COLORS["blue"]),
+            ("operating_margin", "Operating Margin", COLORS["orange"]),
+            ("net_margin", "Net Margin", UP_COLOR),
+            ("fcf_margin", "FCF Margin", COLORS["purple"]),
         ]:
             if col in ratios.columns:
                 fig.add_trace(
@@ -802,20 +792,16 @@ def _render_ratio_analysis(symbol, income_df=None, balance_df=None, cashflow_df=
                         line=dict(color=color),
                     )
                 )
-        fig.update_layout(
-            title="Profitability Ratios (%)",
-            height=350,
-            margin=dict(l=40, r=20, t=40, b=30),
-            yaxis_title="%",
-        )
+        fig.update_layout(title="Profitability Ratios (%)", yaxis_title="%")
+        apply_chart_defaults(fig)
         st.plotly_chart(fig, use_container_width=True)
 
     # Returns & Leverage
     with chart_col2:
         fig = go.Figure()
         for col, name, color in [
-            ("roe", "ROE", "#2196F3"),
-            ("roa", "ROA", "#26a69a"),
+            ("roe", "ROE", COLORS["blue"]),
+            ("roa", "ROA", UP_COLOR),
         ]:
             if col in ratios.columns:
                 fig.add_trace(
@@ -834,17 +820,16 @@ def _render_ratio_analysis(symbol, income_df=None, balance_df=None, cashflow_df=
                     y=ratios["current_ratio"],
                     name="Current Ratio",
                     mode="lines+markers",
-                    line=dict(color="#FF9800", dash="dot"),
+                    line=dict(color=COLORS["orange"], dash="dot"),
                     yaxis="y2",
                 )
             )
         fig.update_layout(
             title="Returns & Leverage",
-            height=350,
-            margin=dict(l=40, r=20, t=40, b=30),
             yaxis_title="%",
             yaxis2=dict(title="Ratio", overlaying="y", side="right"),
         )
+        apply_chart_defaults(fig)
         st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("Ratio Data"):
@@ -896,11 +881,11 @@ def _render_valuation_history(symbol, db, cur="$"):
             if current is not None and not pd.isna(current):
                 pct_rank = (series < current).sum() / len(series) * 100
                 if pct_rank <= 25:
-                    zone_items.append((label, current, "Cheap", "#26a69a"))
+                    zone_items.append((label, current, "Cheap", UP_COLOR))
                 elif pct_rank >= 75:
-                    zone_items.append((label, current, "Expensive", "#ef5350"))
+                    zone_items.append((label, current, "Expensive", DOWN_COLOR))
                 else:
-                    zone_items.append((label, current, "Fair", "#FF9800"))
+                    zone_items.append((label, current, "Fair", COLORS["orange"]))
 
     if zone_items:
         st.subheader("Valuation Zone")
@@ -925,14 +910,14 @@ def _render_valuation_history(symbol, db, cur="$"):
                         y=pe_clean["pe"],
                         name="PE",
                         mode="lines+markers",
-                        line=dict(color="#2196F3"),
+                        line=dict(color=COLORS["blue"]),
                     )
                 )
                 pe_median = pe_clean["pe"].median()
                 fig.add_hline(
                     y=pe_median,
                     line_dash="dash",
-                    line_color="#2196F3",
+                    line_color=COLORS["blue"],
                     opacity=0.5,
                     annotation_text=f"PE Median: {pe_median:.1f}",
                 )
@@ -946,7 +931,7 @@ def _render_valuation_history(symbol, db, cur="$"):
                         y=pb_clean["pb"],
                         name="PB",
                         mode="lines+markers",
-                        line=dict(color="#FF9800"),
+                        line=dict(color=COLORS["orange"]),
                         yaxis="y2",
                     )
                 )
@@ -954,16 +939,16 @@ def _render_valuation_history(symbol, db, cur="$"):
                 fig.add_hline(
                     y=pb_median,
                     line_dash="dash",
-                    line_color="#FF9800",
+                    line_color=COLORS["orange"],
                     opacity=0.5,
                 )
         fig.update_layout(
             title="PE & PB Ratio History",
-            height=400,
-            margin=dict(l=40, r=40, t=40, b=30),
             yaxis_title="PE",
             yaxis2=dict(title="PB", overlaying="y", side="right"),
+            margin=dict(l=40, r=40, t=40, b=30),
         )
+        apply_chart_defaults(fig, height=400)
         st.plotly_chart(fig, use_container_width=True)
 
     # Chart 2: EV/EBITDA and FCF Yield
@@ -979,14 +964,14 @@ def _render_valuation_history(symbol, db, cur="$"):
                         y=ev_clean["ev_ebitda"],
                         name="EV/EBITDA",
                         mode="lines+markers",
-                        line=dict(color="#9C27B0"),
+                        line=dict(color=COLORS["purple"]),
                     )
                 )
                 ev_median = ev_clean["ev_ebitda"].median()
                 fig.add_hline(
                     y=ev_median,
                     line_dash="dash",
-                    line_color="#9C27B0",
+                    line_color=COLORS["purple"],
                     opacity=0.5,
                     annotation_text=f"Median: {ev_median:.1f}",
                 )
@@ -1000,17 +985,17 @@ def _render_valuation_history(symbol, db, cur="$"):
                         y=fcf_clean["fcf_yield"],
                         name="FCF Yield %",
                         mode="lines+markers",
-                        line=dict(color="#26a69a"),
+                        line=dict(color=UP_COLOR),
                         yaxis="y2",
                     )
                 )
         fig.update_layout(
             title="EV/EBITDA & FCF Yield History",
-            height=400,
-            margin=dict(l=40, r=40, t=40, b=30),
             yaxis_title="EV/EBITDA",
             yaxis2=dict(title="FCF Yield %", overlaying="y", side="right"),
+            margin=dict(l=40, r=40, t=40, b=30),
         )
+        apply_chart_defaults(fig, height=400)
         st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("Valuation Data"):
@@ -1062,7 +1047,7 @@ def _render_earnings_growth(symbol, cur="$"):
             yoy_clean = growth[growth["rev_yoy"].notna()]
             if not yoy_clean.empty:
                 yoy_labels = yoy_clean["period_ending"].apply(_period_label)
-                colors = ["#26a69a" if v >= 0 else "#ef5350" for v in yoy_clean["rev_yoy"]]
+                colors = [UP_COLOR if v >= 0 else DOWN_COLOR for v in yoy_clean["rev_yoy"]]
                 fig.add_trace(
                     go.Bar(
                         x=yoy_labels,
@@ -1081,16 +1066,12 @@ def _render_earnings_growth(symbol, cur="$"):
                         y=qoq_clean["rev_qoq"],
                         name="QoQ Growth",
                         mode="lines+markers",
-                        line=dict(color="#FF9800", dash="dot"),
+                        line=dict(color=COLORS["orange"], dash="dot"),
                     )
                 )
         fig.add_hline(y=0, line_dash="solid", line_color="gray", opacity=0.3)
-        fig.update_layout(
-            title="Revenue Growth Rate (%)",
-            height=400,
-            margin=dict(l=40, r=20, t=40, b=30),
-            yaxis_title="%",
-        )
+        fig.update_layout(title="Revenue Growth Rate (%)", yaxis_title="%")
+        apply_chart_defaults(fig, height=400)
         st.plotly_chart(fig, use_container_width=True)
 
     # Chart 2: EPS quarterly trend
@@ -1105,7 +1086,7 @@ def _render_earnings_growth(symbol, cur="$"):
                         x=eps_labels,
                         y=eps_clean["eps"],
                         name="Quarterly EPS",
-                        marker_color="#2196F3",
+                        marker_color=COLORS["blue"],
                     )
                 )
                 # Add TTM EPS as overlay (rolling 4-quarter sum)
@@ -1117,15 +1098,11 @@ def _render_earnings_growth(symbol, cur="$"):
                             y=ttm_eps,
                             name="TTM EPS",
                             mode="lines+markers",
-                            line=dict(color="#9C27B0", width=2),
+                            line=dict(color=COLORS["purple"], width=2),
                         )
                     )
-        fig.update_layout(
-            title=f"EPS Trend ({cur})",
-            height=400,
-            margin=dict(l=40, r=20, t=40, b=30),
-            yaxis_title=f"EPS ({cur})",
-        )
+        fig.update_layout(title=f"EPS Trend ({cur})", yaxis_title=f"EPS ({cur})")
+        apply_chart_defaults(fig, height=400)
         st.plotly_chart(fig, use_container_width=True)
 
     # Revenue bars
@@ -1139,14 +1116,11 @@ def _render_earnings_growth(symbol, cur="$"):
                     x=rev_labels,
                     y=rev_clean["revenue"],
                     name="Quarterly Revenue",
-                    marker_color="#2196F3",
+                    marker_color=COLORS["blue"],
                 )
             )
-            fig.update_layout(
-                title="Quarterly Revenue",
-                height=350,
-                margin=dict(l=40, r=20, t=40, b=30),
-            )
+            fig.update_layout(title="Quarterly Revenue")
+            apply_chart_defaults(fig)
             st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("Growth Data"):
@@ -1184,7 +1158,6 @@ def _render_comparison(symbols, db, cur="$"):
     normalized = normalize_price_series(price_dfs)
     if not normalized.empty:
         fig = go.Figure()
-        colors = ["#2196F3", "#FF9800", "#26a69a"]
         for i, sym in enumerate(normalized.columns):
             fig.add_trace(
                 go.Scatter(
@@ -1192,17 +1165,12 @@ def _render_comparison(symbols, db, cur="$"):
                     y=normalized[sym],
                     name=sym,
                     mode="lines",
-                    line=dict(color=colors[i % len(colors)], width=2),
+                    line=dict(color=SERIES_COLORS[i % len(SERIES_COLORS)], width=2),
                 )
             )
         fig.add_hline(y=100, line_dash="dash", line_color="gray", opacity=0.3)
-        fig.update_layout(
-            height=400,
-            margin=dict(l=40, r=20, t=20, b=30),
-            yaxis_title="Indexed (100 = start)",
-            xaxis_title="",
-        )
-        fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+        fig.update_layout(yaxis_title="Indexed (100 = start)", xaxis_title="")
+        apply_chart_defaults(fig, height=400, skip_weekends=True)
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("No overlapping price data for comparison")
@@ -1242,7 +1210,6 @@ def _render_comparison(symbols, db, cur="$"):
     # Margin comparison
     st.subheader("Margin Comparison")
     margin_fig = go.Figure()
-    colors = ["#2196F3", "#FF9800", "#26a69a"]
     for i, sym in enumerate(symbols):
         inc = fetch_income(sym, "quarter")
         if not inc.empty and "period_ending" in inc.columns and "total_revenue" in inc.columns:
@@ -1257,15 +1224,11 @@ def _render_comparison(symbols, db, cur="$"):
                         y=margin,
                         name=f"{sym} Op Margin",
                         mode="lines+markers",
-                        line=dict(color=colors[i % len(colors)]),
+                        line=dict(color=SERIES_COLORS[i % len(SERIES_COLORS)]),
                     )
                 )
-    margin_fig.update_layout(
-        title="Operating Margin Trends (%)",
-        height=400,
-        margin=dict(l=40, r=20, t=40, b=30),
-        yaxis_title="%",
-    )
+    margin_fig.update_layout(title="Operating Margin Trends (%)", yaxis_title="%")
+    apply_chart_defaults(margin_fig, height=400)
     st.plotly_chart(margin_fig, use_container_width=True)
 
     st.divider()
@@ -1414,31 +1377,7 @@ def main():
         "valuations, growth, comparison, ownership"
     )
 
-    # Responsive CSS for metric cards on narrow screens
-    st.markdown(
-        """<style>
-        @media (max-width: 768px) {
-            [data-testid="stMetricValue"] { font-size: 1.1rem !important; }
-            [data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
-            [data-testid="column"] { min-width: 0 !important; padding: 0 4px !important; }
-        }
-        @media (max-width: 768px) {
-            [data-testid="stHorizontalBlock"] {
-                flex-wrap: wrap !important;
-            }
-            [data-testid="stHorizontalBlock"] > [data-testid="column"] {
-                flex: 0 0 48% !important;
-                min-width: 48% !important;
-            }
-        }
-        @media (max-width: 480px) {
-            [data-testid="stMetricValue"] { font-size: 0.95rem !important; }
-            [data-testid="stMetricLabel"] { font-size: 0.7rem !important; }
-            .stTabs [data-baseweb="tab"] { font-size: 0.85rem !important; }
-        }
-        </style>""",
-        unsafe_allow_html=True,
-    )
+    inject_global_css()
 
     render_sidebar_controls()
 
@@ -1558,17 +1497,15 @@ def main():
                             high=history["high"],
                             low=history["low"],
                             close=history["close"],
-                            increasing_line_color="#26a69a",
-                            decreasing_line_color="#ef5350",
+                            increasing_line_color=UP_COLOR,
+                            decreasing_line_color=DOWN_COLOR,
                         )
                     )
                     fig.update_layout(
-                        height=350,
                         xaxis_rangeslider_visible=False,
-                        margin=dict(l=40, r=20, t=10, b=30),
                         showlegend=False,
                     )
-                    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+                    apply_chart_defaults(fig, skip_weekends=True)
                     st.plotly_chart(fig, use_container_width=True)
                     st.caption(f"[Open full chart view →](/Charts?symbol={symbol})")
                 else:

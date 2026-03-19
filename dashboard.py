@@ -13,7 +13,14 @@ import plotly.graph_objects as go
 import streamlit as st
 from streamlit_sortables import sort_items
 
-from shared import get_db, render_sidebar_controls  # must be first: adds src/ to sys.path
+from shared import (  # must be first: adds src/ to sys.path
+    DOWN_COLOR,
+    UP_COLOR,
+    apply_chart_defaults,
+    get_db,
+    inject_global_css,
+    render_sidebar_controls,
+)
 
 from config import WATCHLIST
 
@@ -105,6 +112,8 @@ def main():
     st.title("📊 Portfolio Dashboard")
     st.markdown("**Real-time portfolio monitoring** | OpenBB Data Pipeline")
 
+    inject_global_css()
+
     # Shared sidebar controls
     render_sidebar_controls()
 
@@ -168,9 +177,9 @@ def main():
             # Color-code changes
             def color_change(val):
                 if isinstance(val, str) and val.startswith("+"):
-                    return "color: green"
+                    return f"color: {UP_COLOR}"
                 elif isinstance(val, str) and val.startswith("-"):
-                    return "color: red"
+                    return f"color: {DOWN_COLOR}"
                 return ""
 
             # Display portfolio table
@@ -216,17 +225,12 @@ def main():
                     high=history_df["high"],
                     low=history_df["low"],
                     close=history_df["close"],
-                    increasing_line_color="#26a69a",
-                    decreasing_line_color="#ef5350",
+                    increasing_line_color=UP_COLOR,
+                    decreasing_line_color=DOWN_COLOR,
                 )
             )
-            fig.update_layout(
-                height=350,
-                xaxis_rangeslider_visible=False,
-                margin=dict(l=40, r=20, t=10, b=30),
-                showlegend=False,
-            )
-            fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+            fig.update_layout(xaxis_rangeslider_visible=False, showlegend=False)
+            apply_chart_defaults(fig, skip_weekends=True)
             st.plotly_chart(fig, use_container_width=True)
             st.caption(f"[Open full chart view →](/Charts?symbol={selected_symbol})")
 

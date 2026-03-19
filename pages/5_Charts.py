@@ -9,7 +9,17 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from shared import get_db, render_sidebar_controls  # must be first: adds src/ to sys.path
+from shared import (  # must be first: adds src/ to sys.path
+    COLORS,
+    DOWN_COLOR,
+    UP_COLOR,
+    apply_chart_defaults,
+    area_fillcolor,
+    chart_config,
+    get_db,
+    inject_global_css,
+    render_sidebar_controls,
+)
 
 from analysis import compute_bollinger_bands, compute_macd, resample_ohlcv
 from config import WATCHLIST
@@ -75,12 +85,12 @@ def load_chart_data(_db, symbol: str, days_back: int) -> pd.DataFrame:
 
 
 MA_COLORS = {
-    "SMA 10": "#FF6B6B",
-    "SMA 20": "#4ECDC4",
-    "SMA 50": "#45B7D1",
-    "SMA 200": "#96CEB4",
-    "EMA 12": "#FFEAA7",
-    "EMA 26": "#DDA0DD",
+    "SMA 10": COLORS["salmon"],
+    "SMA 20": COLORS["teal"],
+    "SMA 50": COLORS["sky"],
+    "SMA 200": COLORS["mint"],
+    "EMA 12": COLORS["cream"],
+    "EMA 26": COLORS["plum"],
 }
 
 
@@ -108,8 +118,8 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
                 low=df["low"],
                 close=df["close"],
                 name="Price",
-                increasing_line_color="#26a69a",
-                decreasing_line_color="#ef5350",
+                increasing_line_color=UP_COLOR,
+                decreasing_line_color=DOWN_COLOR,
             ),
             row=1,
             col=1,
@@ -122,8 +132,8 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
                 fill="tozeroy",
                 mode="lines",
                 name="Close",
-                line=dict(color="#2196F3", width=1.5),
-                fillcolor="rgba(33, 150, 243, 0.15)",
+                line=dict(color=COLORS["blue"], width=1.5),
+                fillcolor=area_fillcolor(COLORS["blue"]),
             ),
             row=1,
             col=1,
@@ -137,8 +147,8 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
                 low=df["low"],
                 close=df["close"],
                 name="Price",
-                increasing_line_color="#26a69a",
-                decreasing_line_color="#ef5350",
+                increasing_line_color=UP_COLOR,
+                decreasing_line_color=DOWN_COLOR,
             ),
             row=1,
             col=1,
@@ -174,7 +184,7 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
                 y=bb["bb_upper"].tolist(),
                 mode="lines",
                 name="BB Upper",
-                line=dict(color="#FF9800", width=1.5, dash="dot"),
+                line=dict(color=COLORS["bb_orange"], width=1.5, dash="dot"),
             ),
             row=1,
             col=1,
@@ -185,7 +195,7 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
                 y=bb["bb_middle"].tolist(),
                 mode="lines",
                 name="BB Middle",
-                line=dict(color="#FF9800", width=1.5),
+                line=dict(color=COLORS["bb_orange"], width=1.5),
             ),
             row=1,
             col=1,
@@ -196,9 +206,9 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
                 y=bb["bb_lower"].tolist(),
                 mode="lines",
                 name="BB Lower",
-                line=dict(color="#FF9800", width=1.5, dash="dot"),
+                line=dict(color=COLORS["bb_orange"], width=1.5, dash="dot"),
                 fill="tonexty",
-                fillcolor="rgba(255, 152, 0, 0.1)",
+                fillcolor=area_fillcolor(COLORS["bb_orange"], 0.1),
             ),
             row=1,
             col=1,
@@ -206,7 +216,7 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
 
     # --- Row 2: Bottom indicator ---
     if indicator == "Volume" and "volume" in df.columns:
-        colors = ["#26a69a" if c >= o else "#ef5350" for c, o in zip(df["close"], df["open"])]
+        colors = [UP_COLOR if c >= o else DOWN_COLOR for c, o in zip(df["close"], df["open"])]
         fig.add_trace(
             go.Bar(
                 x=df["date"],
@@ -222,7 +232,7 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
 
     elif indicator == "MACD":
         macd_df = compute_macd(df)
-        hist_colors = ["#26a69a" if v >= 0 else "#ef5350" for v in macd_df["histogram"]]
+        hist_colors = [UP_COLOR if v >= 0 else DOWN_COLOR for v in macd_df["histogram"]]
         fig.add_trace(
             go.Bar(
                 x=df["date"],
@@ -240,7 +250,7 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
                 y=macd_df["macd_line"],
                 mode="lines",
                 name="MACD",
-                line=dict(color="#2196F3", width=1.5),
+                line=dict(color=COLORS["blue"], width=1.5),
             ),
             row=2,
             col=1,
@@ -251,7 +261,7 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
                 y=macd_df["signal_line"],
                 mode="lines",
                 name="Signal",
-                line=dict(color="#FF9800", width=1.5),
+                line=dict(color=COLORS["orange"], width=1.5),
             ),
             row=2,
             col=1,
@@ -269,8 +279,8 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
                 mode="lines",
                 name="BB Width",
                 fill="tozeroy",
-                line=dict(color="#FF9800", width=1),
-                fillcolor="rgba(255, 152, 0, 0.15)",
+                line=dict(color=COLORS["bb_orange"], width=1),
+                fillcolor=area_fillcolor(COLORS["bb_orange"]),
             ),
             row=2,
             col=1,
@@ -280,19 +290,13 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
     # --- Layout ---
     fig.update_layout(
         title=f"{symbol}",
-        height=700,
         xaxis_rangeslider_visible=False,
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
         margin=dict(l=60, r=20, t=60, b=40),
     )
-    fig.update_xaxes(showgrid=True, gridcolor="rgba(128, 128, 128, 0.2)")
-    fig.update_yaxes(showgrid=True, gridcolor="rgba(128, 128, 128, 0.2)")
     fig.update_yaxes(title_text="Price", row=1, col=1)
-
-    # Skip weekends/holidays for daily data
-    if skip_gaps:
-        fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+    apply_chart_defaults(fig, height=700, skip_weekends=skip_gaps)
 
     return fig
 
@@ -300,6 +304,7 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
 def main():
     st.title("📈 Charts")
 
+    inject_global_css()
     render_sidebar_controls()
 
     # --- Sidebar controls ---
@@ -354,7 +359,7 @@ def main():
 
     # --- Build and render chart ---
     fig = build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays)
-    st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+    st.plotly_chart(fig, use_container_width=True, config=chart_config())
 
     # --- Metrics bar ---
     latest = df.iloc[-1]

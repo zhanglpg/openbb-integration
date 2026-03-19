@@ -8,7 +8,7 @@ from datetime import datetime  # noqa: I001
 import pandas as pd
 import streamlit as st
 
-from shared import get_db, render_sidebar_controls  # must be first: adds src/ to sys.path
+from shared import get_db, inject_global_css, render_sidebar_controls  # must be first
 
 from config import ECONOMIC_INDICATORS
 from economic_dashboard import EconomicDashboard
@@ -106,6 +106,7 @@ def main():
     st.title("🏛️ Economy Dashboard")
     st.markdown("**Macroeconomic indicators and trends** | OpenBB Data Pipeline")
 
+    inject_global_css()
     render_sidebar_controls()
 
     db = get_db()
