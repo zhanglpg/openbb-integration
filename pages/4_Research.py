@@ -18,8 +18,9 @@ from shared import (  # must be first: adds src/ to sys.path
     UP_COLOR,
     apply_chart_defaults,
     get_db,
-    inject_global_css,
     render_sidebar_controls,
+    setup_page_theme,
+    symbol_selectbox,
 )
 
 from analysis import (
@@ -37,6 +38,8 @@ from analysis import (
 from config import WATCHLIST
 from fetcher import DataFetcher
 from research import analyze_symbol_deep, assess_macro_risks, compare_peers, screen_opportunities
+
+st.set_page_config(page_title="Research", page_icon="🔬", layout="wide")
 
 ALL_SYMBOLS = sorted(set(sym for symbols in WATCHLIST.values() for sym in symbols))
 
@@ -1377,16 +1380,14 @@ def main():
         "valuations, growth, comparison, ownership"
     )
 
-    inject_global_css()
+    setup_page_theme()
 
     render_sidebar_controls()
 
     db = get_db()
 
     # Symbol selector (defaults to the symbol selected on the dashboard)
-    default_sym = st.session_state.get("selected_symbol", ALL_SYMBOLS[0])
-    default_idx = ALL_SYMBOLS.index(default_sym) if default_sym in ALL_SYMBOLS else 0
-    symbol = st.selectbox("Select Symbol", ALL_SYMBOLS, index=default_idx)
+    symbol = symbol_selectbox(ALL_SYMBOLS, sidebar=False)
     if not symbol:
         return
 

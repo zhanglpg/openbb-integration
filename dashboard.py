@@ -19,8 +19,10 @@ from shared import (  # must be first: adds src/ to sys.path
     chart_config,
     get_data_freshness,
     get_db,
-    inject_global_css,
+    get_palette,
     render_sidebar_controls,
+    setup_page_theme,
+    symbol_selectbox,
 )
 
 from config import WATCHLIST
@@ -119,7 +121,7 @@ def main():
     st.title("📊 Portfolio Dashboard")
     st.markdown("**Real-time portfolio monitoring** | OpenBB Data Pipeline")
 
-    inject_global_css()
+    setup_page_theme()
 
     # Shared sidebar controls
     render_sidebar_controls()
@@ -127,10 +129,8 @@ def main():
     # Load persisted symbol order
     current_order = load_symbol_order()
 
-    # Symbol selector (shared across pages via session_state)
-    selected_symbol = st.sidebar.selectbox(
-        "Select Symbol", current_order, index=0, key="selected_symbol"
-    )
+    # Symbol selector (shared across pages via session_state + query param)
+    selected_symbol = symbol_selectbox(current_order)
 
     # Initialize database (cached)
     db = get_db()
@@ -323,13 +323,17 @@ def main():
                     marker=dict(color=colors, line=dict(width=0)),
                     text=[f"${v:,.0f}  ({p:.1f}%)" for v, p in zip(values, pcts)],
                     textposition="auto",
-                    textfont=dict(color="#FAFAFA", size=12),
+                    textfont=dict(color=get_palette()["bar_text"], size=12),
                     hovertemplate="%{y}<br>$%{x:,.2f}<br><extra></extra>",
                 )
             )
             fig.update_layout(
                 height=max(280, len(labels) * 38 + 60),
-                xaxis=dict(title="Market Value ($)", showgrid=True, gridcolor="#2a2a2a"),
+                xaxis=dict(
+                    title="Market Value ($)",
+                    showgrid=True,
+                    gridcolor=get_palette()["chart_grid"],
+                ),
                 yaxis=dict(title=""),
                 margin=dict(l=10, r=20, t=10, b=40),
                 showlegend=False,

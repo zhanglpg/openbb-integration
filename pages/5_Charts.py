@@ -17,8 +17,9 @@ from shared import (  # must be first: adds src/ to sys.path
     area_fillcolor,
     chart_config,
     get_db,
-    inject_global_css,
     render_sidebar_controls,
+    setup_page_theme,
+    symbol_selectbox,
 )
 
 from analysis import compute_bollinger_bands, compute_macd, resample_ohlcv
@@ -304,16 +305,11 @@ def build_chart(df, chart_type, indicator, symbol, skip_gaps, ma_overlays=None):
 def main():
     st.title("📈 Charts")
 
-    inject_global_css()
+    setup_page_theme()
     render_sidebar_controls()
 
     # --- Sidebar controls ---
-    # Prefer query param (from "Open full chart view" links), then session_state
-    query_sym = st.query_params.get("symbol")
-    fallback = st.session_state.get("selected_symbol", ALL_SYMBOLS[0])
-    default_sym = query_sym if query_sym in ALL_SYMBOLS else fallback
-    default_idx = ALL_SYMBOLS.index(default_sym) if default_sym in ALL_SYMBOLS else 0
-    symbol = st.sidebar.selectbox("Symbol", ALL_SYMBOLS, index=default_idx)
+    symbol = symbol_selectbox(ALL_SYMBOLS, sidebar=True, label="Symbol")
     chart_type = st.sidebar.radio("Chart Type", ["Candlestick", "Area", "OHLC Bars"])
     time_range = st.sidebar.radio("Time Range", list(TIME_RANGES.keys()), index=2, horizontal=True)
 

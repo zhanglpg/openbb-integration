@@ -39,28 +39,84 @@ COLORS = {
 SERIES_COLORS = [COLORS["blue"], COLORS["orange"], COLORS["green"]]
 
 # ---------------------------------------------------------------------------
-# Plotly dark template — auto-applies to every go.Figure()
+# Theme palettes
 # ---------------------------------------------------------------------------
-_openclaw_template = go.layout.Template(
-    layout=go.Layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#FAFAFA"),
-        xaxis=dict(
-            gridcolor="rgba(128,128,128,0.15)",
-            zerolinecolor="rgba(128,128,128,0.25)",
-        ),
-        yaxis=dict(
-            gridcolor="rgba(128,128,128,0.15)",
-            zerolinecolor="rgba(128,128,128,0.25)",
-        ),
-        hoverlabel=dict(bgcolor="#1A1D23", font_color="#FAFAFA", bordercolor="#333"),
-        margin=dict(l=40, r=20, t=40, b=30),
-        legend=dict(font=dict(color="#FAFAFA")),
+THEME_PALETTES = {
+    "dark": {
+        "bg": "#0E1117",
+        "secondary_bg": "#262730",
+        "text": "#FAFAFA",
+        "grid": "rgba(128,128,128,0.15)",
+        "zeroline": "rgba(128,128,128,0.25)",
+        "hover_bg": "#1A1D23",
+        "hover_border": "#333",
+        "chart_grid": "#2a2a2a",
+        "bar_text": "#FAFAFA",
+    },
+    "light": {
+        "bg": "#FFFFFF",
+        "secondary_bg": "#F0F2F6",
+        "text": "#1A1A2E",
+        "grid": "rgba(128,128,128,0.2)",
+        "zeroline": "rgba(128,128,128,0.3)",
+        "hover_bg": "#FFFFFF",
+        "hover_border": "#CCC",
+        "chart_grid": "#E0E0E0",
+        "bar_text": "#1A1A2E",
+    },
+}
+
+
+def get_theme() -> str:
+    """Return current theme, persisted via query param ``t``."""
+    if "theme" not in st.session_state:
+        st.session_state["theme"] = st.query_params.get("t", "dark")
+    return st.session_state["theme"]
+
+
+def get_palette() -> dict:
+    """Return the active theme palette."""
+    return THEME_PALETTES[get_theme()]
+
+
+# ---------------------------------------------------------------------------
+# Plotly templates — dark and light variants
+# ---------------------------------------------------------------------------
+def _build_plotly_template(palette: dict, transparent: bool = True) -> go.layout.Template:
+    bg = "rgba(0,0,0,0)" if transparent else palette["bg"]
+    return go.layout.Template(
+        layout=go.Layout(
+            paper_bgcolor=bg,
+            plot_bgcolor=bg,
+            font=dict(color=palette["text"]),
+            xaxis=dict(
+                gridcolor=palette["grid"],
+                zerolinecolor=palette["zeroline"],
+            ),
+            yaxis=dict(
+                gridcolor=palette["grid"],
+                zerolinecolor=palette["zeroline"],
+            ),
+            hoverlabel=dict(
+                bgcolor=palette["hover_bg"],
+                font_color=palette["text"],
+                bordercolor=palette["hover_border"],
+            ),
+            margin=dict(l=40, r=20, t=40, b=30),
+            legend=dict(font=dict(color=palette["text"])),
+        )
     )
-)
-pio.templates["openclaw_dark"] = _openclaw_template
+
+
+pio.templates["openclaw_dark"] = _build_plotly_template(THEME_PALETTES["dark"], transparent=True)
+pio.templates["openclaw_light"] = _build_plotly_template(THEME_PALETTES["light"], transparent=False)
 pio.templates.default = "openclaw_dark"
+
+
+def apply_theme():
+    """Set the default Plotly template based on current theme."""
+    theme = get_theme()
+    pio.templates.default = f"openclaw_{theme}"
 
 
 # ---------------------------------------------------------------------------
@@ -92,28 +148,254 @@ def area_fillcolor(hex_color: str, opacity: float = 0.15) -> str:
 # ---------------------------------------------------------------------------
 def inject_global_css():
     """Inject responsive CSS for metric cards, columns, dividers, dataframes."""
+    palette = get_palette()
+    light_overrides = ""
+    if get_theme() == "light":
+        bg = palette["bg"]
+        sbg = palette["secondary_bg"]
+        txt = palette["text"]
+        light_overrides = f"""
+        /* Force browser-level light rendering */
+        * {{ color-scheme: light !important; }}
+
+        /* Streamlit CSS custom properties */
+        .stApp {{
+            background-color: {bg} !important;
+            color: {txt} !important;
+            color-scheme: light !important;
+            --primary-color: #2196F3;
+            --background-color: {bg};
+            --secondary-background-color: {sbg};
+            --text-color: {txt};
+        }}
+
+        /* Header / toolbar */
+        [data-testid="stHeader"] {{
+            background-color: {bg} !important;
+            color: {txt} !important;
+        }}
+        .stDeployButton,
+        [data-testid="stToolbar"] {{
+            color: {txt} !important;
+        }}
+
+        /* Main content containers */
+        [data-testid="stAppViewContainer"],
+        .stAppViewBlockContainer,
+        [data-testid="stBottomBlockContainer"] {{
+            background-color: {bg} !important;
+            color: {txt} !important;
+        }}
+
+        /* Sidebar */
+        section[data-testid="stSidebar"],
+        [data-testid="stSidebar"] {{
+            background-color: {sbg} !important;
+            color: {txt} !important;
+        }}
+        [data-testid="stSidebar"] *,
+        [data-testid="stSidebarNavItems"] *,
+        [data-testid="stSidebarNavLink"] * {{
+            color: {txt} !important;
+        }}
+        [data-testid="stSidebarNavItems"],
+        [data-testid="stSidebarNavLink"] {{
+            color: {txt} !important;
+        }}
+
+        /* Text elements */
+        h1, h2, h3, h4, h5, h6, p, span, label, div {{
+            color: {txt} !important;
+        }}
+        [data-testid="stMarkdownContainer"],
+        .stMarkdown, .stCaption {{
+            color: {txt} !important;
+        }}
+
+        /* Metrics */
+        [data-testid="stMetricValue"],
+        [data-testid="stMetricLabel"],
+        [data-testid="stMetricDelta"] {{
+            color: {txt} !important;
+        }}
+
+        /* Expander */
+        [data-testid="stExpander"] {{
+            background-color: {sbg} !important;
+            border-color: #D0D0D0 !important;
+        }}
+
+        /* Tabs */
+        .stTabs [data-baseweb="tab"] {{
+            color: {txt} !important;
+        }}
+
+        /* Form inputs */
+        input, textarea, select, [data-baseweb="select"] {{
+            background-color: {bg} !important;
+            color: {txt} !important;
+        }}
+
+        /* Selectbox / multiselect */
+        [data-testid="stSelectbox"],
+        [data-testid="stMultiSelect"] {{
+            color: {txt} !important;
+        }}
+
+        /* Dropdown menus / popovers */
+        [data-baseweb="popover"],
+        [data-baseweb="menu"],
+        [data-baseweb="list"] {{
+            background-color: {bg} !important;
+            color: {txt} !important;
+        }}
+        [data-baseweb="popover"] *,
+        [data-baseweb="menu"] *,
+        [data-baseweb="list"] * {{
+            color: {txt} !important;
+        }}
+
+        /* Dataframe / glide-data-grid */
+        [data-testid="stDataFrame"] {{
+            color: {txt} !important;
+        }}
+        [data-testid="stDataFrame"] iframe {{
+            color-scheme: light !important;
+        }}
+        [data-testid="stDataFrameGlideDataEditor"] {{
+            color-scheme: light !important;
+        }}
+
+        /* Alert boxes */
+        [data-testid="stAlert"] {{
+            color: {txt} !important;
+        }}
+
+        /* Selectbox / input internals (baseui) */
+        [data-baseweb="select"] > div {{
+            background-color: {bg} !important;
+            color: {txt} !important;
+            border-color: #CCC !important;
+        }}
+        [data-baseweb="input"] {{
+            background-color: {bg} !important;
+            color: {txt} !important;
+        }}
+        [data-baseweb="input"] > div {{
+            background-color: {bg} !important;
+        }}
+
+        /* Buttons */
+        .stButton > button {{
+            background-color: {sbg} !important;
+            color: {txt} !important;
+            border-color: #CCC !important;
+        }}
+        [data-testid="stSidebar"] .stButton > button {{
+            background-color: {bg} !important;
+            color: {txt} !important;
+            border-color: #CCC !important;
+        }}
+
+        /* Radio buttons / checkboxes */
+        [data-testid="stRadio"] label,
+        [data-testid="stCheckbox"] label {{
+            color: {txt} !important;
+        }}
+
+        /* Plotly chart containers — override dark iframe background */
+        .stPlotlyChart,
+        [data-testid="stPlotlyChart"] {{
+            background-color: {bg} !important;
+        }}
+        .stPlotlyChart iframe {{
+            background-color: {bg} !important;
+        }}
+
+        /* Data editor */
+        [data-testid="stDataEditor"] {{
+            color-scheme: light !important;
+        }}
+
+        /* Info / warning / success boxes */
+        .stAlert, [data-testid="stAlert"] {{
+            background-color: {sbg} !important;
+        }}
+
+        /* Toggle */
+        [data-testid="stToggle"] label span {{
+            color: {txt} !important;
+        }}
+        """
+
     st.markdown(
-        """<style>
-        @media (max-width: 768px) {
-            [data-testid="stMetricValue"] { font-size: 1.1rem !important; }
-            [data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
-            [data-testid="column"] { min-width: 0 !important; padding: 0 4px !important; }
-            [data-testid="stHorizontalBlock"] {
+        f"""<style>
+        {light_overrides}
+        @media (max-width: 768px) {{
+            [data-testid="stMetricValue"] {{ font-size: 1.1rem !important; }}
+            [data-testid="stMetricLabel"] {{ font-size: 0.75rem !important; }}
+            [data-testid="column"] {{ min-width: 0 !important; padding: 0 4px !important; }}
+            [data-testid="stHorizontalBlock"] {{
                 flex-wrap: wrap !important;
-            }
-            [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+            }}
+            [data-testid="stHorizontalBlock"] > [data-testid="column"] {{
                 flex: 0 0 48% !important;
                 min-width: 48% !important;
-            }
-        }
-        @media (max-width: 480px) {
-            [data-testid="stMetricValue"] { font-size: 0.95rem !important; }
-            [data-testid="stMetricLabel"] { font-size: 0.7rem !important; }
-            .stTabs [data-baseweb="tab"] { font-size: 0.85rem !important; }
-        }
+            }}
+        }}
+        @media (max-width: 480px) {{
+            [data-testid="stMetricValue"] {{ font-size: 0.95rem !important; }}
+            [data-testid="stMetricLabel"] {{ font-size: 0.7rem !important; }}
+            .stTabs [data-baseweb="tab"] {{ font-size: 0.85rem !important; }}
+        }}
         </style>""",
         unsafe_allow_html=True,
     )
+
+
+def _apply_streamlit_theme():
+    """Dynamically override Streamlit's config.toml theme colors.
+
+    Must run BEFORE any widgets render so Glide Data Grid picks up correct colors.
+    """
+    from streamlit import _config
+
+    palette = get_palette()
+    _config.set_option("theme.backgroundColor", palette["bg"])
+    _config.set_option("theme.secondaryBackgroundColor", palette["secondary_bg"])
+    _config.set_option("theme.textColor", palette["text"])
+
+
+def setup_page_theme():
+    """Single call to set up theming on every page."""
+    _apply_streamlit_theme()
+    render_theme_toggle()
+    inject_global_css()
+    apply_theme()
+
+
+def symbol_selectbox(symbols, sidebar=True, label="Select Symbol"):
+    """Shared symbol selector with cross-page persistence.
+
+    Uses ``index=`` instead of ``key=`` to avoid bidirectional binding
+    that conflicts with manual session_state writes from query params.
+    """
+    query_sym = st.query_params.get("symbol")
+    current = st.session_state.get("selected_symbol")
+
+    if query_sym and query_sym in symbols:
+        default = query_sym
+    elif current and current in symbols:
+        default = current
+    else:
+        default = symbols[0]
+
+    idx = symbols.index(default) if default in symbols else 0
+    fn = st.sidebar.selectbox if sidebar else st.selectbox
+    symbol = fn(label, symbols, index=idx)
+    st.session_state["selected_symbol"] = symbol
+    st.query_params["symbol"] = symbol
+    return symbol
 
 
 @st.cache_resource
@@ -203,6 +485,17 @@ def render_freshness_sidebar(_db) -> None:
             lines.append(f'<span style="color:{color}">●</span> {label} — {ago}')
     st.sidebar.markdown("**Data Freshness**")
     st.sidebar.markdown("<br>".join(lines), unsafe_allow_html=True)
+
+
+def render_theme_toggle():
+    """Render light/dark toggle in top-right corner of main content."""
+    _, right = st.columns([9, 1])
+    with right:
+        light_on = st.toggle("☀️", value=get_theme() == "light", key="light_mode_toggle")
+        new_theme = "light" if light_on else "dark"
+        if new_theme != st.session_state.get("theme"):
+            st.session_state["theme"] = new_theme
+        st.query_params["t"] = new_theme
 
 
 def render_sidebar_controls():

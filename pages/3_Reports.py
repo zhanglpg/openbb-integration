@@ -8,8 +8,13 @@ import sys
 
 import streamlit as st
 
-from shared import inject_global_css, render_sidebar_controls  # adds src/ to sys.path
+from shared import (  # adds src/ to sys.path
+    render_sidebar_controls,
+    setup_page_theme,
+)
 from config import REPORTS_DIR
+
+st.set_page_config(page_title="Reports", page_icon="📋", layout="wide")
 
 
 def get_available_reports() -> list[str]:
@@ -32,7 +37,7 @@ def main():
     st.title("Daily Market Reports")
     st.markdown("**Automated daily briefings** | OpenClaw Financial Intelligence")
 
-    inject_global_css()
+    setup_page_theme()
     render_sidebar_controls()
 
     available = get_available_reports()

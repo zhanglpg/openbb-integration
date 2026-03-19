@@ -9,12 +9,14 @@ import streamlit as st
 from shared import (  # must be first
     get_data_freshness,
     get_db,
-    inject_global_css,
     render_sidebar_controls,
+    setup_page_theme,
 )
 
 from config import ECONOMIC_INDICATORS
 from economic_dashboard import EconomicDashboard
+
+st.set_page_config(page_title="Economy", page_icon="🌐", layout="wide")
 
 
 @st.cache_resource
@@ -109,7 +111,7 @@ def main():
     st.title("🏛️ Economy Dashboard")
     st.markdown("**Macroeconomic indicators and trends** | OpenBB Data Pipeline")
 
-    inject_global_css()
+    setup_page_theme()
     render_sidebar_controls()
 
     db = get_db()
