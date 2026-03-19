@@ -35,9 +35,21 @@ $message" 2>/dev/null || log "Warning: Could not send Discord message"
 
 log "=== Starting Hourly Sync ==="
 
+# Step 0: Check for uncommitted local changes (user might be working on code)
+log "Checking for uncommitted changes..."
+cd "$OPENBB_DIR"
+
+UNCOMMITTED=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+
+if [ "$UNCOMMITTED" -gt 0 ]; then
+    log "⚠️ Uncommitted changes detected ($UNCOMMITTED files). User may be working on code. Skipping sync."
+    exit 0
+fi
+
+log "✅ No uncommitted changes. Proceeding with sync."
+
 # Step 1: Sync repo
 log "Syncing OpenBB repo..."
-cd "$OPENBB_DIR"
 
 # Get commit hash before pull
 BEFORE_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
