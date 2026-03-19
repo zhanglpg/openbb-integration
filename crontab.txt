@@ -1,5 +1,0 @@
-# OpenBB data pipeline — daily at 8:00 AM
-0 8 * * * cd ~/.openbb_platform && .venv/bin/python src/run_pipeline.py full >> logs/pipeline.log 2>&1
-
-# OpenBB Hourly Sync — Auto-sync repo, pipeline, restart dashboard, verify & report
-0 * * * * ~/.openbb_platform/scripts/hourly_sync.sh
