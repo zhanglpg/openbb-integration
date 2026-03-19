@@ -13,7 +13,6 @@ import streamlit as st
 from streamlit_sortables import sort_items
 
 from shared import (  # must be first: adds src/ to sys.path
-    COLORS,
     DOWN_COLOR,
     UP_COLOR,
     apply_chart_defaults,
@@ -273,36 +272,68 @@ def main():
                 "View by", ["Sector", "Symbol"], horizontal=True, key="allocation_view"
             )
 
+            # Professional muted palette (Bloomberg / institutional style)
+            _ALLOC_PALETTE = [
+                "#3A5BA0",  # navy blue
+                "#5B8DBE",  # steel blue
+                "#6B9A7B",  # sage green
+                "#8C7AA9",  # muted purple
+                "#C4956A",  # warm tan
+                "#7A9EAF",  # slate teal
+                "#A0766E",  # dusty rose
+                "#6E8B99",  # blue-grey
+                "#9AAF8C",  # olive sage
+                "#B08EA2",  # mauve
+                "#7B9BAD",  # cadet blue
+                "#A89A6F",  # sand
+            ]
             sector_colors = {
-                "Tech": COLORS["blue"],
-                "China": COLORS["orange"],
-                "Semiconductors": COLORS["green"],
-                "Etfs": COLORS["purple"],
-                "Other": COLORS["salmon"],
+                "Tech": _ALLOC_PALETTE[0],
+                "China": _ALLOC_PALETTE[4],
+                "Semiconductors": _ALLOC_PALETTE[2],
+                "Etfs": _ALLOC_PALETTE[3],
+                "Other": _ALLOC_PALETTE[7],
             }
-            symbol_palette = list(COLORS.values())
 
             if view_mode == "Sector":
-                grouped = active_holdings.groupby("Sector")["Market Value"].sum().reset_index()
+                grouped = (
+                    active_holdings.groupby("Sector")["Market Value"]
+                    .sum()
+                    .sort_values(ascending=True)
+                    .reset_index()
+                )
+                grouped["Pct"] = grouped["Market Value"] / total_value * 100
                 labels = grouped["Sector"].tolist()
                 values = grouped["Market Value"].tolist()
-                colors = [sector_colors.get(s, COLORS["teal"]) for s in labels]
+                pcts = grouped["Pct"].tolist()
+                colors = [sector_colors.get(s, _ALLOC_PALETTE[7]) for s in labels]
             else:
-                labels = active_holdings["Symbol"].tolist()
-                values = active_holdings["Market Value"].tolist()
-                colors = [symbol_palette[i % len(symbol_palette)] for i in range(len(labels))]
+                sorted_h = active_holdings.sort_values("Market Value", ascending=True)
+                sorted_h["Pct"] = sorted_h["Market Value"] / total_value * 100
+                labels = sorted_h["Symbol"].tolist()
+                values = sorted_h["Market Value"].tolist()
+                pcts = sorted_h["Pct"].tolist()
+                colors = [_ALLOC_PALETTE[i % len(_ALLOC_PALETTE)] for i in range(len(labels))]
 
             fig = go.Figure(
-                go.Pie(
-                    labels=labels,
-                    values=values,
-                    hole=0.4,
-                    marker=dict(colors=colors),
-                    textinfo="label+percent",
-                    hovertemplate="%{label}<br>$%{value:,.2f}<br>%{percent}<extra></extra>",
+                go.Bar(
+                    y=labels,
+                    x=values,
+                    orientation="h",
+                    marker=dict(color=colors, line=dict(width=0)),
+                    text=[f"${v:,.0f}  ({p:.1f}%)" for v, p in zip(values, pcts)],
+                    textposition="auto",
+                    textfont=dict(color="#FAFAFA", size=12),
+                    hovertemplate="%{y}<br>$%{x:,.2f}<br><extra></extra>",
                 )
             )
-            fig.update_layout(height=420, showlegend=True)
+            fig.update_layout(
+                height=max(280, len(labels) * 38 + 60),
+                xaxis=dict(title="Market Value ($)", showgrid=True, gridcolor="#2a2a2a"),
+                yaxis=dict(title=""),
+                margin=dict(l=10, r=20, t=10, b=40),
+                showlegend=False,
+            )
             st.plotly_chart(fig, use_container_width=True, config=chart_config())
         else:
             st.info("Enter share counts above to see portfolio allocation.")
