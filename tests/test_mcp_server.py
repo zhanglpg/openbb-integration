@@ -629,3 +629,265 @@ class TestAnalysisToolsIntegration:
         # Latest close should match
         latest_from_history = max(history, key=lambda r: r["date"])["close"]
         assert technicals["latest_close"] == latest_from_history
+
+
+# ===================================================================
+# Report tools — get_daily_report, list_reports
+# ===================================================================
+
+
+@pytest.mark.integration
+class TestGetDailyReport:
+    def test_existing_report_returned(self, mcp_db, tmp_path):
+        """Loading a previously saved report returns its content."""
+        report_dir = tmp_path / "reports"
+        report_dir.mkdir()
+        report_file = report_dir / "2025-06-15.md"
+        report_file.write_text("# Daily Report\nTest content", encoding="utf-8")
+        with patch.object(mcp_server, "REPORTS_DIR", report_dir):
+            result = mcp_server.get_daily_report("2025-06-15")
+        assert "# Daily Report" in result
+        assert "Test content" in result
+
+    def test_missing_date_generates_fresh(self, mcp_db, tmp_path):
+        """When no saved report exists for date, a fresh one is generated."""
+        report_dir = tmp_path / "reports"
+        report_dir.mkdir()
+        with (
+            patch.object(mcp_server, "REPORTS_DIR", report_dir),
+            patch.object(mcp_server, "ALL_SYMBOLS", ["AAPL"]),
+        ):
+            result = mcp_server.get_daily_report("2025-06-20")
+        assert isinstance(result, str)
+        # Report file should have been saved
+        assert (report_dir / "2025-06-20.md").exists()
+
+    def test_no_date_uses_today(self, mcp_db, tmp_path):
+        """Omitting date generates report with today's date."""
+        report_dir = tmp_path / "reports"
+        report_dir.mkdir()
+        with (
+            patch.object(mcp_server, "REPORTS_DIR", report_dir),
+            patch.object(mcp_server, "ALL_SYMBOLS", []),
+        ):
+            result = mcp_server.get_daily_report(None)
+        assert isinstance(result, str)
+        # At least one .md file should exist
+        assert len(list(report_dir.glob("*.md"))) == 1
+
+    def test_generated_report_contains_sections(self, mcp_db, tmp_path):
+        """Generated report has expected markdown structure."""
+        # Seed some data so the report is non-trivial
+        _seed_prices(mcp_db, "AAPL", [(f"2025-06-{i:02d}", 150.0 + i) for i in range(1, 21)])
+        _seed_fundamentals(mcp_db, "AAPL")
+        report_dir = tmp_path / "reports"
+        report_dir.mkdir()
+        with (
+            patch.object(mcp_server, "REPORTS_DIR", report_dir),
+            patch.object(mcp_server, "ALL_SYMBOLS", ["AAPL"]),
+        ):
+            result = mcp_server.get_daily_report("2025-06-20")
+        assert "#" in result  # Has markdown headers
+
+
+@pytest.mark.integration
+class TestListReports:
+    def test_returns_dates(self, tmp_path):
+        """Lists report file stems as dates."""
+        report_dir = tmp_path / "reports"
+        report_dir.mkdir()
+        for d in ["2025-06-01", "2025-06-02", "2025-06-03"]:
+            (report_dir / f"{d}.md").write_text("report")
+        with patch.object(mcp_server, "REPORTS_DIR", report_dir):
+            result = mcp_server.list_reports(limit=10)
+        assert len(result) == 3
+        assert "2025-06-03" in result
+
+    def test_respects_limit(self, tmp_path):
+        """Limit parameter caps the number of results."""
+        report_dir = tmp_path / "reports"
+        report_dir.mkdir()
+        for i in range(1, 8):
+            (report_dir / f"2025-06-{i:02d}.md").write_text("report")
+        with patch.object(mcp_server, "REPORTS_DIR", report_dir):
+            result = mcp_server.list_reports(limit=3)
+        assert len(result) == 3
+
+    def test_empty_directory(self, tmp_path):
+        """Empty reports directory returns empty list."""
+        report_dir = tmp_path / "reports"
+        report_dir.mkdir()
+        with patch.object(mcp_server, "REPORTS_DIR", report_dir):
+            result = mcp_server.list_reports()
+        assert result == []
+
+    def test_no_directory(self, tmp_path):
+        """Non-existent reports directory returns empty list."""
+        report_dir = tmp_path / "nonexistent"
+        with patch.object(mcp_server, "REPORTS_DIR", report_dir):
+            result = mcp_server.list_reports()
+        assert result == []
+
+    def test_sorted_most_recent_first(self, tmp_path):
+        """Reports are returned most-recent first."""
+        report_dir = tmp_path / "reports"
+        report_dir.mkdir()
+        for d in ["2025-06-01", "2025-06-15", "2025-06-10"]:
+            (report_dir / f"{d}.md").write_text("report")
+        with patch.object(mcp_server, "REPORTS_DIR", report_dir):
+            result = mcp_server.list_reports()
+        assert result[0] == "2025-06-15"
+        assert result[-1] == "2025-06-01"
+
+
+# ===================================================================
+# Research tools — compare_sector_peers, deep_analyze_symbol,
+#                  assess_portfolio_risks, find_opportunities
+# ===================================================================
+
+
+@pytest.mark.integration
+class TestCompareSectorPeers:
+    def test_valid_category(self, mcp_db):
+        """Returns comparison data for a valid watchlist category."""
+        import numpy as np
+
+        np.random.seed(42)
+        for sym in ["AAPL", "MSFT"]:
+            prices = 150 + np.cumsum(np.random.randn(30) * 2)
+            dates = [(f"2025-06-{i:02d}", float(p)) for i, p in zip(range(1, 31), prices)]
+            _seed_prices(mcp_db, sym, dates)
+            _seed_fundamentals(mcp_db, sym)
+        with patch.object(mcp_server, "WATCHLIST", {"tech": ["AAPL", "MSFT"]}):
+            result = mcp_server.compare_sector_peers("tech")
+        assert isinstance(result, dict)
+        assert "error" not in result
+
+    def test_invalid_category(self, mcp_db):
+        """Unknown category returns error with available categories."""
+        result = mcp_server.compare_sector_peers("nonexistent")
+        assert "error" in result
+        assert "nonexistent" in result["error"]
+
+    def test_empty_db(self, mcp_db):
+        """Valid category with no data still returns without crashing."""
+        with patch.object(mcp_server, "WATCHLIST", {"tech": ["AAPL", "MSFT"]}):
+            result = mcp_server.compare_sector_peers("tech")
+        assert isinstance(result, dict)
+
+
+@pytest.mark.integration
+class TestDeepAnalyzeSymbol:
+    def test_full_data(self, mcp_db):
+        """Symbol with prices, fundamentals, and filings returns full analysis."""
+        _seed_prices(mcp_db, "AAPL", [(f"2025-06-{i:02d}", 150.0 + i) for i in range(1, 21)])
+        _seed_fundamentals(mcp_db, "AAPL")
+        _seed_sec_filings(mcp_db, "AAPL")
+        with (
+            patch.object(mcp_server, "ALL_SYMBOLS", ["AAPL"]),
+            patch.object(mcp_server, "WATCHLIST", {"tech": ["AAPL"]}),
+        ):
+            result = mcp_server.deep_analyze_symbol("AAPL")
+        assert isinstance(result, dict)
+        assert result.get("symbol") == "AAPL"
+
+    def test_no_price_data(self, mcp_db):
+        """Symbol with no price data gets error in technicals but doesn't crash."""
+        _seed_fundamentals(mcp_db, "AAPL")
+        with (
+            patch.object(mcp_server, "ALL_SYMBOLS", ["AAPL"]),
+            patch.object(mcp_server, "WATCHLIST", {"tech": ["AAPL"]}),
+        ):
+            result = mcp_server.deep_analyze_symbol("AAPL")
+        assert isinstance(result, dict)
+
+    def test_case_insensitive(self, mcp_db):
+        """Symbol is uppercased internally."""
+        _seed_prices(mcp_db, "AAPL", [(f"2025-06-{i:02d}", 150.0 + i) for i in range(1, 11)])
+        with (
+            patch.object(mcp_server, "ALL_SYMBOLS", ["AAPL"]),
+            patch.object(mcp_server, "WATCHLIST", {"tech": ["AAPL"]}),
+        ):
+            result = mcp_server.deep_analyze_symbol("aapl")
+        assert result.get("symbol") == "AAPL"
+
+
+@pytest.mark.integration
+class TestAssessPortfolioRisks:
+    def test_with_data(self, mcp_db):
+        """Seeded portfolio data returns risk assessment."""
+        import numpy as np
+
+        np.random.seed(42)
+        for sym in ["AAPL", "MSFT"]:
+            prices = 150 + np.cumsum(np.random.randn(30) * 2)
+            dates = [(f"2025-06-{i:02d}", float(p)) for i, p in zip(range(1, 31), prices)]
+            _seed_prices(mcp_db, sym, dates)
+        _seed_economic(mcp_db, "FEDFUNDS", [(f"2024-{m:02d}-01", 5.25) for m in range(1, 13)])
+        _seed_economic(mcp_db, "T10Y2Y", [(f"2024-{m:02d}-01", 0.5) for m in range(1, 13)])
+        _seed_economic(mcp_db, "VIXCLS", [(f"2024-{m:02d}-01", 15.0) for m in range(1, 13)])
+        with (
+            patch.object(mcp_server, "ALL_SYMBOLS", ["AAPL", "MSFT"]),
+            patch.object(mcp_server, "WATCHLIST", {"tech": ["AAPL", "MSFT"]}),
+        ):
+            result = mcp_server.assess_portfolio_risks()
+        assert isinstance(result, dict)
+        assert "overall_risk_level" in result
+
+    def test_empty_db(self, mcp_db):
+        """Empty DB doesn't crash."""
+        with (
+            patch.object(mcp_server, "ALL_SYMBOLS", []),
+            patch.object(mcp_server, "WATCHLIST", {}),
+        ):
+            result = mcp_server.assess_portfolio_risks()
+        assert isinstance(result, dict)
+
+
+@pytest.mark.integration
+class TestFindOpportunities:
+    def test_with_data(self, mcp_db):
+        """Seeded data returns opportunity list."""
+        import numpy as np
+
+        np.random.seed(42)
+        # Seed prices going down (to trigger "below SMA" signal)
+        for sym, base in [("AAPL", 150), ("MSFT", 300)]:
+            prices = base - np.arange(30) * 0.5  # declining
+            dates = [(f"2025-06-{i:02d}", float(p)) for i, p in zip(range(1, 31), prices)]
+            _seed_prices(mcp_db, sym, dates)
+        # Seed low PE fundamentals
+        for sym in ["AAPL", "MSFT"]:
+            with sqlite3.connect(mcp_db.db_path) as conn:
+                conn.execute(
+                    """INSERT OR REPLACE INTO fundamentals
+                       (symbol, snapshot_date, market_cap, pe_ratio, pb_ratio,
+                        debt_to_equity, return_on_equity, dividend_yield)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (sym, "2025-06-01", 2e12, 15.0, 5.0, 1.0, 0.25, 0.01),
+                )
+        with patch.object(mcp_server, "ALL_SYMBOLS", ["AAPL", "MSFT"]):
+            result = mcp_server.find_opportunities(max_pe=30.0)
+        assert isinstance(result, list)
+
+    def test_custom_max_pe(self, mcp_db):
+        """Respects max_pe filter."""
+        _seed_prices(mcp_db, "AAPL", [(f"2025-06-{i:02d}", 150.0 - i) for i in range(1, 21)])
+        with sqlite3.connect(mcp_db.db_path) as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO fundamentals
+                   (symbol, snapshot_date, market_cap, pe_ratio)
+                   VALUES (?, ?, ?, ?)""",
+                ("AAPL", "2025-06-01", 2e12, 50.0),
+            )
+        with patch.object(mcp_server, "ALL_SYMBOLS", ["AAPL"]):
+            result = mcp_server.find_opportunities(max_pe=10.0)
+        # PE=50 is above max_pe=10, so AAPL should be excluded
+        symbols = [r["symbol"] for r in result]
+        assert "AAPL" not in symbols
+
+    def test_empty_db(self, mcp_db):
+        """Empty DB returns empty list."""
+        with patch.object(mcp_server, "ALL_SYMBOLS", []):
+            result = mcp_server.find_opportunities()
+        assert result == []

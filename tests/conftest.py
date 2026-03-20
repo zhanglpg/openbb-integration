@@ -1,11 +1,19 @@
 """Shared test fixtures for OpenBB integration tests."""
 
 import sys
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+
+# ---------------------------------------------------------------------------
+# Globally disable time.sleep so rate-limit delays and retry backoff
+# don't slow down the test suite (~120s → ~5s).
+# ---------------------------------------------------------------------------
+_real_sleep = time.sleep
+time.sleep = lambda _: None
 
 # Mock the openbb module before any src module imports it.
 # This is necessary because openbb may not be installed in CI/test environments.

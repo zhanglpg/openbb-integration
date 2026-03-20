@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 
 class TestDataStorageInit:
@@ -140,3 +141,68 @@ class TestWatchlist:
         result = tmp_storage.get_watchlist()
         assert len(result) == 1
         assert result["name"].iloc[0] == "Apple Inc"
+
+
+# ===================================================================
+# Error paths and edge cases
+# ===================================================================
+
+
+class TestLoadPricesErrorPaths:
+    def test_load_corrupted_parquet(self, tmp_storage):
+        """Corrupted parquet file raises an error (not silent)."""
+        # Write garbage to where a parquet file would be
+        corrupt_file = tmp_storage.prices_dir / "AAPL_prices_20250101.parquet"
+        corrupt_file.write_bytes(b"this is not a parquet file")
+        with pytest.raises(Exception):
+            tmp_storage.load_prices("AAPL")
+
+    def test_load_fundamentals_corrupted(self, tmp_storage):
+        """Corrupted fundamentals parquet raises an error."""
+        corrupt_file = tmp_storage.fundamentals_dir / "AAPL_metrics_20250101.parquet"
+        corrupt_file.write_bytes(b"corrupt data")
+        with pytest.raises(Exception):
+            tmp_storage.load_fundamentals("AAPL", "metrics")
+
+
+class TestSaveEdgeCases:
+    def test_save_prices_creates_metadata_columns(self, tmp_storage, sample_price_df):
+        """Saved data includes _symbol and _fetched_at metadata."""
+        tmp_storage.save_prices("AAPL", sample_price_df)
+        loaded = tmp_storage.load_prices("AAPL")
+        assert "_symbol" in loaded.columns
+        assert "_fetched_at" in loaded.columns
+
+    def test_save_sec_filings_empty_df(self, tmp_storage):
+        """Empty SEC filings DF returns empty list, no crash."""
+        result = tmp_storage.save_sec_filings("AAPL", pd.DataFrame())
+        assert result == []
+
+    def test_save_fundamentals_none_values(self, tmp_storage):
+        """DataFrame with None values saves successfully."""
+        df = pd.DataFrame({"metric": [None, "test"], "value": [1.0, None]})
+        path = tmp_storage.save_fundamentals("AAPL", "metrics", df)
+        assert path != ""
+        loaded = tmp_storage.load_fundamentals("AAPL", "metrics")
+        assert not loaded.empty
+
+
+class TestFetchHistoryErrorPaths:
+    def test_log_failed_fetch_and_retrieve(self, tmp_storage):
+        """Error fetches are logged and retrievable."""
+        tmp_storage.log_fetch("AAPL", "prices", "yfinance", "error", "Connection timeout", 0)
+        tmp_storage.log_fetch("AAPL", "prices", "yfinance", "success", record_count=100)
+        history = tmp_storage.get_fetch_history(symbol="AAPL")
+        assert len(history) == 2
+        statuses = list(history["status"])
+        assert "error" in statuses
+        assert "success" in statuses
+
+    def test_fetch_history_multiple_types(self, tmp_storage):
+        """Fetch history includes all data types."""
+        tmp_storage.log_fetch("AAPL", "prices", "yfinance", "success", record_count=100)
+        tmp_storage.log_fetch("AAPL", "fundamentals", "yfinance", "success", record_count=5)
+        history = tmp_storage.get_fetch_history(symbol="AAPL")
+        assert len(history) == 2
+        types = set(history["data_type"])
+        assert types == {"prices", "fundamentals"}

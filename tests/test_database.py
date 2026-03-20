@@ -541,3 +541,113 @@ class TestGetPriceHistoryByDate:
         result = tmp_db.get_price_history_by_date("AAPL", "2025-01-01")
         expected_cols = {"date", "open", "high", "low", "close", "volume", "adj_close"}
         assert expected_cols == set(result.columns)
+
+
+# ===================================================================
+# Edge cases — schema, metadata, upserts, large batches
+# ===================================================================
+
+
+class TestSchemaVersion:
+    def test_schema_version_stored(self, tmp_db):
+        """schema_version table has the expected version."""
+        import sqlite3
+
+        from database import SCHEMA_VERSION
+
+        with sqlite3.connect(tmp_db.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1"
+            )
+            row = cursor.fetchone()
+        assert row is not None
+        assert row[0] == SCHEMA_VERSION
+
+
+class TestUpdateMetadataEdgeCases:
+    def test_creates_fetch_log_entry(self, tmp_db):
+        """update_metadata creates a row in the fetch log."""
+        tmp_db.update_metadata("prices", "AAPL", 100, "success")
+        history = tmp_db.get_fetch_history("AAPL")
+        assert len(history) >= 1
+
+    def test_multiple_updates(self, tmp_db):
+        """Multiple update_metadata calls create multiple log entries."""
+        tmp_db.update_metadata("prices", "AAPL", 100, "success")
+        tmp_db.update_metadata("prices", "AAPL", 50, "success")
+        history = tmp_db.get_fetch_history("AAPL")
+        assert len(history) >= 2
+
+
+class TestGetAllSymbolsEdgeCases:
+    def test_returns_symbols_from_prices(self, tmp_db):
+        """get_all_symbols returns symbols that have price data."""
+        df = pd.DataFrame(
+            {
+                "date": ["2025-01-01"],
+                "open": [150.0],
+                "high": [155.0],
+                "low": [149.0],
+                "close": [152.0],
+                "volume": [1000000],
+            }
+        )
+        tmp_db.save_prices(df, "AAPL")
+        tmp_db.save_prices(df, "MSFT")
+        symbols = tmp_db.get_all_symbols()
+        assert "AAPL" in symbols
+        assert "MSFT" in symbols
+
+    def test_empty_db(self, tmp_db):
+        """Empty database returns empty list."""
+        assert tmp_db.get_all_symbols() == []
+
+
+class TestPriceUpsert:
+    def test_duplicate_dates_overwrite(self, tmp_db):
+        """Saving prices for the same symbol+date overwrites cleanly."""
+        df1 = pd.DataFrame(
+            {
+                "date": ["2025-01-01"],
+                "open": [150.0],
+                "high": [155.0],
+                "low": [149.0],
+                "close": [152.0],
+                "volume": [1000000],
+            }
+        )
+        df2 = pd.DataFrame(
+            {
+                "date": ["2025-01-01"],
+                "open": [151.0],
+                "high": [156.0],
+                "low": [150.0],
+                "close": [160.0],
+                "volume": [2000000],
+            }
+        )
+        tmp_db.save_prices(df1, "AAPL")
+        tmp_db.save_prices(df2, "AAPL")
+        result = tmp_db.get_latest_prices("AAPL", days=30)
+        assert len(result) == 1
+        assert result["close"].iloc[0] == 160.0
+
+
+class TestLargeBatchQuery:
+    def test_many_symbols_batch(self, tmp_db):
+        """Batch query with many symbols doesn't crash."""
+        df = pd.DataFrame(
+            {
+                "date": ["2025-01-01"],
+                "open": [100.0],
+                "high": [105.0],
+                "low": [99.0],
+                "close": [102.0],
+                "volume": [500000],
+            }
+        )
+        symbols = [f"SYM{i:03d}" for i in range(50)]
+        for sym in symbols:
+            tmp_db.save_prices(df, sym)
+        result = tmp_db.get_latest_prices_batch(symbols, days=30)
+        assert len(result["symbol"].unique()) == 50
