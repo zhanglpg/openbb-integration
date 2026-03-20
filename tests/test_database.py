@@ -557,8 +557,7 @@ class TestSchemaVersion:
 
         with sqlite3.connect(tmp_db.db_path) as conn:
             cursor = conn.execute(
-                "SELECT version FROM schema_version"
-                " ORDER BY applied_at DESC LIMIT 1"
+                "SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1"
             )
             row = cursor.fetchone()
         assert row is not None
