@@ -895,7 +895,8 @@ def _render_valuation_history(symbol, db, cur="$"):
         cols = st.columns(len(zone_items))
         for col, (label, value, zone, color) in zip(cols, zone_items):
             col.metric(label, f"{value:.1f}")
-            col.markdown(f":{color.replace('#', '')}[**{zone}**] vs own history")
+            color_name = {UP_COLOR: "green", DOWN_COLOR: "red"}.get(color, "orange")
+            col.markdown(f":{color_name}[**{zone}**] vs own history")
 
     st.divider()
 

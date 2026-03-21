@@ -602,6 +602,23 @@ def compute_historical_valuations(
         else:
             row["pe"] = None
 
+        # When currencies differ, balance sheet shares (ordinary) may not match
+        # the price basis (e.g. ADS for ADRs).  Derive price-consistent share
+        # count from net_income / EPS so that PB, EV/EBITDA and FCF yield use
+        # the same per-share unit as close_price.
+        implied_shares = None
+        if fx_rate != 1.0:
+            net_inc = inc_row.get("net_income")
+            if (
+                eps is not None
+                and not pd.isna(eps)
+                and eps != 0
+                and net_inc is not None
+                and not pd.isna(net_inc)
+                and net_inc != 0
+            ):
+                implied_shares = abs(net_inc / eps)
+
         # PB from balance sheet
         if not bal.empty:
             bal_match = bal[bal["period_ending"] == pe_date]
@@ -630,7 +647,8 @@ def compute_historical_valuations(
                         and not pd.isna(shares)
                         and shares > 0
                     ):
-                        bvps = equity / shares / fx_rate
+                        pb_shares = implied_shares if implied_shares else shares
+                        bvps = equity / pb_shares / fx_rate
                         if bvps > 0:
                             row["pb"] = round(close_price / bvps, 2)
 
@@ -648,7 +666,8 @@ def compute_historical_valuations(
                         and not pd.isna(ebitda_ttm)
                         and ebitda_ttm > 0
                     ):
-                        market_cap = close_price * shares_val
+                        mc_shares = implied_shares if implied_shares else shares_val
+                        market_cap = close_price * mc_shares
                         debt_num = debt_val / fx_rate if debt_val and not pd.isna(debt_val) else 0
                         cash_num = cash_val / fx_rate if cash_val and not pd.isna(cash_val) else 0
                         ev = market_cap + debt_num - cash_num
@@ -677,7 +696,8 @@ def compute_historical_valuations(
                             and not pd.isna(shares_val2)
                             and shares_val2 > 0
                         ):
-                            market_cap2 = close_price * shares_val2
+                            mc_shares2 = implied_shares if implied_shares else shares_val2
+                            market_cap2 = close_price * mc_shares2
                             if market_cap2 > 0:
                                 row["fcf_yield"] = round((fcf / fx_rate) / market_cap2 * 100, 2)
 
