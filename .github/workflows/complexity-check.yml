@@ -1,2 +1,18 @@
-- name: Complexity Accounting
-  uses: zhanglpg/code-complexity-measure@v1
+name: Complexity Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  complexity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Complexity Accounting
+        uses: zhanglpg/code-complexity-measure@v1
