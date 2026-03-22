@@ -118,8 +118,9 @@ shared.py                    ← Shared Streamlit helpers
 
 ## Data Storage
 
-- **SQLite**: `data/openbb_data.db` — 6 tables (`price_history`, `fundamentals`, `sec_filings`, `economic_indicators`, `watchlist`, `fetch_log`)
+- **SQLite**: `data/openbb_data.db` — 8 tables (`price_history`, `fundamentals`, `sec_filings`, `economic_indicators`, `watchlist`, `fetch_log`, `holdings`, `research_notes`)
 - **Parquet**: `data/prices/`, `data/fundamentals/`, `data/sec/`
+- **Reports**: `data/reports/` — Generated daily brief markdown files
 - Schema is versioned; delete the DB file to recreate from scratch (pipeline is additive/idempotent)
 
 ## Analysis Features
