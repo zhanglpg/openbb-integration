@@ -46,10 +46,18 @@ python src/run_pipeline.py test
 streamlit run dashboard.py
 ```
 
-The dashboard is two pages:
+The dashboard has **5 pages**:
 
-- **Portfolio** (`dashboard.py`) — latest prices, daily changes, drag-drop symbol reordering
-- **Economy** (`pages/2_Economy.py`) — FRED macro indicators (GDP, CPI, unemployment, Fed funds rate, etc.)
+1. **Portfolio** (`dashboard.py`) — Latest prices, daily changes, drag-drop symbol reordering, portfolio summary
+2. **Economy** (`pages/2_Economy.py`) — FRED macro indicators (GDP, CPI, unemployment, Fed funds rate, yield curves, etc.)
+3. **Reports** (`pages/3_Reports.py`) — Daily briefs, SEC filing summaries, valuation screens
+4. **Research** (`pages/4_Research.py`) — Deep analysis tools including:
+   - Company research reports
+   - Peer comparison analysis
+   - Industry trend analysis
+   - Risk assessment
+   - Earnings analysis
+5. **Charts** (`pages/5_Charts.py`) — Interactive price charts, technical indicators, correlation matrices
 
 The dashboard can also be managed as a background service via launchctl (`~/Library/LaunchAgents/com.openclaw.dashboard.plist`).
 
@@ -57,32 +65,55 @@ The dashboard can also be managed as a background service via launchctl (`~/Libr
 
 An MCP server (`src/mcp_server.py`) exposes the database as tools for Claude Code:
 
-- `get_portfolio_overview` — latest prices and daily change for all symbols
+- `get_portfolio_overview` — Latest prices and daily change for all symbols
 - `get_price_history` — OHLCV history for a symbol
 - `get_fundamentals` — PE, market cap, EPS, revenue, etc.
-- `get_sec_filings` — recent SEC filings
+- `get_sec_filings` — Recent SEC filings
 - `get_economic_indicators` — FRED series data
-- `get_watchlist` — current watchlist configuration
+- `get_watchlist` — Current watchlist configuration
 
 Configured via `.mcp.json` in the project root.
+
+### Daily Brief Export
+
+The `brief_exporter.py` module generates daily portfolio briefs in markdown format, summarizing:
+- Portfolio performance
+- Key market movements
+- SEC filing activity
+- Economic indicator updates
+
+```bash
+python src/brief_exporter.py --output /path/to/briefs/
+```
 
 ## Architecture
 
 ```
-src/run_pipeline.py              ← CLI entry point
-    ├── src/watchlist_fetcher.py  ← orchestrates per-symbol fetching
-    │   ├── src/fetcher.py       ← wrapper around OpenBB SDK (obb.equity.*)
-    │   └── src/retry.py         ← exponential backoff for API calls
-    ├── src/sec_parser.py        ← SEC EDGAR filings
-    ├── src/economic_dashboard.py ← FRED / macro indicators
-    ├── src/database.py          ← SQLite storage (schema v2, upsert-based)
-    └── src/config.py            ← paths, watchlist, pipeline defaults
+src/
+├── run_pipeline.py          ← CLI entry point
+├── watchlist_fetcher.py     ← Orchestrates per-symbol fetching
+│   ├── fetcher.py           ← Wrapper around OpenBB SDK (obb.equity.*)
+│   └── retry.py             ← Exponential backoff for API calls
+├── sec_parser.py            ← SEC EDGAR filings parser
+├── economic_dashboard.py    ← FRED / macro indicators
+├── database.py              ← SQLite storage (schema v2, upsert-based)
+├── storage.py               ← Parquet file storage
+├── config.py                ← Paths, watchlist, pipeline defaults
+├── analysis.py              ← Portfolio risk, technicals, valuation screens
+├── report.py                ← Report generation and formatting
+├── research.py              ← Deep research and peer analysis
+├── brief_exporter.py        ← Daily brief markdown export
+├── watchlist.py             ← Watchlist management
+└── mcp_server.py            ← MCP server for Claude Code
 
-dashboard.py                     ← Streamlit main page (Portfolio)
-pages/2_Economy.py               ← Streamlit economy page
-shared.py                        ← shared Streamlit helpers
+dashboard.py                 ← Streamlit main page (Portfolio)
+pages/
+├── 2_Economy.py             ← Economy page (FRED indicators)
+├── 3_Reports.py             ← Reports page (briefs, filings, screens)
+├── 4_Research.py            ← Research page (deep analysis)
+└── 5_Charts.py              ← Charts page (visualization)
 
-src/mcp_server.py                ← MCP server for Claude Code
+shared.py                    ← Shared Streamlit helpers
 ```
 
 ## Data Storage
@@ -91,9 +122,31 @@ src/mcp_server.py                ← MCP server for Claude Code
 - **Parquet**: `data/prices/`, `data/fundamentals/`, `data/sec/`
 - Schema is versioned; delete the DB file to recreate from scratch (pipeline is additive/idempotent)
 
+## Analysis Features
+
+The `analysis.py` module provides:
+
+- **Portfolio Risk Metrics** — VaR, Sharpe ratio, beta, correlation analysis
+- **Price Technicals** — Moving averages, RSI, MACD, Bollinger Bands
+- **Valuation Screens** — PE, PB, PEG, EV/EBITDA comparisons
+- **SEC Activity Analysis** — Filing frequency, insider trading patterns
+- **Macro Snapshot** — Economic indicator trends and comparisons
+
+## Configuration
+
+Edit `src/config.py` to customize:
+
+- **WATCHLIST** — Symbols to track (organized by category)
+- **ECONOMIC_INDICATORS** — FRED series IDs to fetch
+- **DB_PATH** — SQLite database location
+- **REPORTS_DIR** — Output directory for generated reports
+
 ## Development
 
 ```bash
+# Install dev dependencies
+pip install -r requirements-dev.txt
+
 # Run tests
 pytest tests/
 
@@ -101,3 +154,15 @@ pytest tests/
 ruff check .
 ruff format --check .
 ```
+
+## Project Documentation
+
+- [`project.md`](project.md) — Original project brief and requirements
+- [`PROJECT_BRIEF_ENHANCEMENT.md`](PROJECT_BRIEF_ENHANCEMENT.md) — Enhanced feature specifications
+- [`IMPROVEMENTS.md`](IMPROVEMENTS.md) — Planned improvements and roadmap
+- [`DASHBOARD.md`](DASHBOARD.md) — Dashboard design notes
+- [`PIPELINE_README.md`](PIPELINE_README.md) — Pipeline architecture details
+
+## License
+
+MIT
