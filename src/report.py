@@ -99,71 +99,60 @@ def generate_daily_report(
     }
 
 
-def format_report_markdown(report: dict) -> str:
-    """Format a report dict as a readable Markdown document."""
-    lines = []
-    lines.append(f"# Daily Market Report — {report['date']}")
-    lines.append(f"*Generated: {report['generated_at']}*")
-    lines.append("")
+def _fmt_change(chg) -> str:
+    """Format a percent change value."""
+    return f"{chg:+.2f}%" if chg is not None else "N/A"
 
-    # Market Summary
-    lines.append("## Market Summary")
+
+def _fmt_benchmarks(report: dict) -> list[str]:
+    lines = ["## Market Summary"]
     if report.get("benchmarks"):
         for b in report["benchmarks"]:
-            chg = b.get("change_pct")
-            chg_str = f"{chg:+.2f}%" if chg is not None else "N/A"
-            lines.append(f"- **{b['symbol']}**: ${b.get('price', 'N/A')} ({chg_str})")
+            chg = _fmt_change(b.get("change_pct"))
+            lines.append(f"- **{b['symbol']}**: ${b.get('price', 'N/A')} ({chg})")
     else:
         lines.append("- No benchmark data available")
-    lines.append("")
+    return lines
 
-    # Top Performers
-    lines.append("## Top Performers")
+
+def _fmt_performers(report: dict) -> list[str]:
+    lines = ["## Top Performers"]
     for p in report.get("top_performers", []):
-        chg = p.get("change_pct")
-        chg_str = f"{chg:+.2f}%" if chg is not None else "N/A"
-        lines.append(f"- **{p['symbol']}**: {chg_str}")
+        lines.append(f"- **{p['symbol']}**: {_fmt_change(p.get('change_pct'))}")
     lines.append("")
-
-    # Bottom Performers
     lines.append("## Bottom Performers")
     for p in report.get("bottom_performers", []):
-        chg = p.get("change_pct")
-        chg_str = f"{chg:+.2f}%" if chg is not None else "N/A"
-        lines.append(f"- **{p['symbol']}**: {chg_str}")
-    lines.append("")
+        lines.append(f"- **{p['symbol']}**: {_fmt_change(p.get('change_pct'))}")
+    return lines
 
-    # Notable Movers
-    if report.get("notable_movers"):
-        lines.append("## Notable Movers (>3% change)")
-        for m in report["notable_movers"]:
-            chg_str = f"{m['change_pct']:+.2f}%"
-            lines.append(f"- **{m['symbol']}**: {chg_str}")
-        lines.append("")
 
-    # Technical Signals
-    if report.get("technical_signals"):
-        lines.append("## Technical Signals")
-        above_sma20 = [s for s in report["technical_signals"] if s.get("sma20_position") == "above"]
-        below_sma20 = [s for s in report["technical_signals"] if s.get("sma20_position") == "below"]
-        volume_surges = [
-            s for s in report["technical_signals"] if (s.get("volume_trend") or 0) > 1.5
-        ]
-        if above_sma20:
-            syms = ", ".join(s["symbol"] for s in above_sma20)
-            lines.append(f"- **Above SMA-20**: {syms}")
-        if below_sma20:
-            syms = ", ".join(s["symbol"] for s in below_sma20)
-            lines.append(f"- **Below SMA-20**: {syms}")
-        if volume_surges:
-            for s in volume_surges:
-                lines.append(
-                    f"- **Volume surge**: {s['symbol']} ({s['volume_trend']:.1f}x 20d avg)"
-                )
-        lines.append("")
+def _fmt_movers(report: dict) -> list[str]:
+    if not report.get("notable_movers"):
+        return []
+    lines = ["## Notable Movers (>3% change)"]
+    for m in report["notable_movers"]:
+        lines.append(f"- **{m['symbol']}**: {m['change_pct']:+.2f}%")
+    return lines
 
-    # Macro Environment
-    lines.append("## Macro Environment")
+
+def _fmt_technicals(report: dict) -> list[str]:
+    if not report.get("technical_signals"):
+        return []
+    lines = ["## Technical Signals"]
+    above_sma20 = [s for s in report["technical_signals"] if s.get("sma20_position") == "above"]
+    below_sma20 = [s for s in report["technical_signals"] if s.get("sma20_position") == "below"]
+    volume_surges = [s for s in report["technical_signals"] if (s.get("volume_trend") or 0) > 1.5]
+    if above_sma20:
+        lines.append(f"- **Above SMA-20**: {', '.join(s['symbol'] for s in above_sma20)}")
+    if below_sma20:
+        lines.append(f"- **Below SMA-20**: {', '.join(s['symbol'] for s in below_sma20)}")
+    for s in volume_surges:
+        lines.append(f"- **Volume surge**: {s['symbol']} ({s['volume_trend']:.1f}x 20d avg)")
+    return lines
+
+
+def _fmt_macro(report: dict) -> list[str]:
+    lines = ["## Macro Environment"]
     macro = report.get("macro_summary", {})
     if macro.get("yield_curve"):
         lines.append(f"- **Yield Curve**: {macro['yield_curve']}")
@@ -171,39 +160,62 @@ def format_report_markdown(report: dict) -> str:
         lines.append(f"- **VIX Regime**: {macro['vix_regime']}")
     if macro.get("rate_direction"):
         lines.append(f"- **Fed Funds Direction**: {macro['rate_direction']}")
-    lines.append("")
+    return lines
 
-    # SEC Activity
-    if report.get("sec_recent_8k"):
-        lines.append("## Recent SEC 8-K Filings")
-        for filing in report["sec_recent_8k"][:10]:
-            desc = filing.get("description", "")
-            desc_str = f" — {desc}" if desc else ""
-            lines.append(f"- **{filing['symbol']}** ({filing['date']}){desc_str}")
-        lines.append("")
 
-    # Risk Highlights
+def _fmt_sec(report: dict) -> list[str]:
+    if not report.get("sec_recent_8k"):
+        return []
+    lines = ["## Recent SEC 8-K Filings"]
+    for filing in report["sec_recent_8k"][:10]:
+        desc = filing.get("description", "")
+        desc_str = f" — {desc}" if desc else ""
+        lines.append(f"- **{filing['symbol']}** ({filing['date']}){desc_str}")
+    return lines
+
+
+def _fmt_risk(report: dict) -> list[str]:
     risk = report.get("risk_highlights", {})
-    if risk.get("most_volatile") or risk.get("least_volatile"):
-        lines.append("## Risk Highlights")
-        if risk.get("most_volatile"):
-            lines.append(f"- **Most volatile**: {', '.join(risk['most_volatile'])}")
-        if risk.get("least_volatile"):
-            lines.append(f"- **Least volatile**: {', '.join(risk['least_volatile'])}")
-        if risk.get("avg_correlation") is not None:
-            lines.append(f"- **Avg pairwise correlation**: {risk['avg_correlation']:.3f}")
-        lines.append("")
+    if not risk.get("most_volatile") and not risk.get("least_volatile"):
+        return []
+    lines = ["## Risk Highlights"]
+    if risk.get("most_volatile"):
+        lines.append(f"- **Most volatile**: {', '.join(risk['most_volatile'])}")
+    if risk.get("least_volatile"):
+        lines.append(f"- **Least volatile**: {', '.join(risk['least_volatile'])}")
+    if risk.get("avg_correlation") is not None:
+        lines.append(f"- **Avg pairwise correlation**: {risk['avg_correlation']:.3f}")
+    return lines
 
-    # Alerts
-    if report.get("alerts"):
-        lines.append("## Alerts")
-        for alert in report["alerts"]:
-            lines.append(f"- [{alert['severity'].upper()}] {alert['message']}")
-        lines.append("")
 
-    lines.append("---")
-    lines.append("*OpenClaw Financial Intelligence*")
-    return "\n".join(lines)
+def _fmt_alerts(report: dict) -> list[str]:
+    if not report.get("alerts"):
+        return []
+    lines = ["## Alerts"]
+    for alert in report["alerts"]:
+        lines.append(f"- [{alert['severity'].upper()}] {alert['message']}")
+    return lines
+
+
+def format_report_markdown(report: dict) -> str:
+    """Format a report dict as a readable Markdown document."""
+    sections = [
+        [f"# Daily Market Report — {report['date']}", f"*Generated: {report['generated_at']}*"],
+        _fmt_benchmarks(report),
+        _fmt_performers(report),
+        _fmt_movers(report),
+        _fmt_technicals(report),
+        _fmt_macro(report),
+        _fmt_sec(report),
+        _fmt_risk(report),
+        _fmt_alerts(report),
+        ["---", "*OpenClaw Financial Intelligence*"],
+    ]
+    parts = []
+    for section in sections:
+        if section:
+            parts.append("\n".join(section))
+    return "\n\n".join(parts)
 
 
 def identify_notable_movers(
@@ -234,6 +246,175 @@ def identify_notable_movers(
     return movers
 
 
+def _sma_crossover_alert(symbol: str, tech: dict, crossover_pct: float) -> dict | None:
+    """Generate SMA crossover alert if SMA-5 diverges significantly from SMA-20."""
+    sma5 = tech.get("sma_5")
+    sma20 = tech.get("sma_20")
+    if sma5 is None or sma20 is None:
+        return None
+    if sma5 > sma20 * (1 + crossover_pct):
+        return {
+            "severity": "info",
+            "category": "technical",
+            "message": (
+                f"{symbol}: SMA-5 ({sma5:.2f}) well above SMA-20 ({sma20:.2f}) — bullish momentum"
+            ),
+        }
+    if sma5 < sma20 * (1 - crossover_pct):
+        return {
+            "severity": "warning",
+            "category": "technical",
+            "message": (
+                f"{symbol}: SMA-5 ({sma5:.2f}) well below SMA-20 ({sma20:.2f}) — bearish signal"
+            ),
+        }
+    return None
+
+
+def _technical_alerts(technicals: dict[str, dict], t: dict) -> list[dict]:
+    """Generate alerts from technical indicators (SMA crossovers, volume, drawdown)."""
+    alerts = []
+    crossover_pct = t.get("sma_crossover_pct", 0.02)
+    for symbol, tech in technicals.items():
+        if "error" in tech:
+            continue
+        sma_alert = _sma_crossover_alert(symbol, tech, crossover_pct)
+        if sma_alert:
+            alerts.append(sma_alert)
+
+        vol_ratio = tech.get("volume_trend_ratio")
+        if vol_ratio is not None and vol_ratio > t.get("volume_surge_ratio", 2.0):
+            alerts.append(
+                {
+                    "severity": "info",
+                    "category": "volume",
+                    "message": f"{symbol}: Volume surge detected ({vol_ratio:.1f}x 20d average)",
+                }
+            )
+
+        drawdown = tech.get("max_drawdown_pct")
+        if drawdown is not None and drawdown < t.get("drawdown_pct", -15):
+            alerts.append(
+                {
+                    "severity": "warning",
+                    "category": "risk",
+                    "message": f"{symbol}: Max drawdown of {drawdown:.1f}% in lookback period",
+                }
+            )
+    return alerts
+
+
+def _price_movement_alerts(portfolio_snapshot: list[dict] | None, t: dict) -> list[dict]:
+    """Generate alerts for significant price movements."""
+    if not portfolio_snapshot:
+        return []
+    alerts = []
+    stock_threshold = t.get("price_move_stock_pct", 5.0)
+    etf_threshold = t.get("price_move_etf_pct", 3.0)
+    for item in portfolio_snapshot:
+        chg = item.get("change_pct")
+        if chg is None:
+            continue
+        sym = item["symbol"]
+        threshold = etf_threshold if sym in ETF_SYMBOLS else stock_threshold
+        if abs(chg) > threshold:
+            direction = "up" if chg > 0 else "down"
+            alerts.append(
+                {
+                    "severity": "warning",
+                    "category": "price",
+                    "message": (
+                        f"{sym}: {direction} {abs(chg):.1f}% — exceeds {threshold}% threshold"
+                    ),
+                }
+            )
+    return alerts
+
+
+def _valuation_alerts(valuations: list[dict] | None, t: dict) -> list[dict]:
+    """Flag symbols with PE well below peer median."""
+    if not valuations:
+        return []
+    pe_values = [
+        v["pe_ratio"] for v in valuations if v.get("pe_ratio") is not None and v["pe_ratio"] > 0
+    ]
+    if not pe_values:
+        return []
+    pe_values_sorted = sorted(pe_values)
+    mid = len(pe_values_sorted) // 2
+    if len(pe_values_sorted) % 2 == 0 and len(pe_values_sorted) >= 2:
+        median_pe = (pe_values_sorted[mid - 1] + pe_values_sorted[mid]) / 2
+    else:
+        median_pe = pe_values_sorted[mid]
+    discount_pct = t.get("valuation_pe_discount_pct", 20)
+    cutoff = median_pe * (1 - discount_pct / 100)
+    alerts = []
+    for v in valuations:
+        pe = v.get("pe_ratio")
+        if pe is not None and 0 < pe < cutoff:
+            alerts.append(
+                {
+                    "severity": "info",
+                    "category": "valuation",
+                    "message": (
+                        f"{v['symbol']}: PE {pe:.1f} is "
+                        f"{((median_pe - pe) / median_pe * 100):.0f}% below "
+                        f"peer median ({median_pe:.1f})"
+                    ),
+                }
+            )
+    return alerts
+
+
+def _macro_and_risk_alerts(
+    macro_snapshot: dict,
+    sec_activity: dict,
+    risk_summary: dict | None,
+    t: dict,
+) -> list[dict]:
+    """Generate macro, risk correlation, and SEC alerts."""
+    alerts = []
+    if risk_summary:
+        avg_corr = risk_summary.get("portfolio", {}).get("avg_pairwise_correlation")
+        if avg_corr is not None and avg_corr > t.get("correlation_high", 0.7):
+            alerts.append(
+                {
+                    "severity": "warning",
+                    "category": "risk",
+                    "message": (
+                        f"Portfolio avg pairwise correlation is {avg_corr:.2f} — "
+                        f"high concentration risk"
+                    ),
+                }
+            )
+    if macro_snapshot.get("yield_curve_status") == "inverted":
+        alerts.append(
+            {
+                "severity": "warning",
+                "category": "macro",
+                "message": "Yield curve inverted — historically associated with recessions",
+            }
+        )
+    if macro_snapshot.get("vix_regime") == "high":
+        alerts.append(
+            {
+                "severity": "warning",
+                "category": "macro",
+                "message": "VIX in high regime — elevated market fear",
+            }
+        )
+    recent_8k = sec_activity.get("recent_8k_activity", [])
+    if len(recent_8k) > t.get("sec_8k_count", 5):
+        alerts.append(
+            {
+                "severity": "info",
+                "category": "sec",
+                "message": f"{len(recent_8k)} recent 8-K filings — review for material events",
+            }
+        )
+    return alerts
+
+
 def identify_alerts(
     technicals: dict[str, dict],
     macro_snapshot: dict,
@@ -258,155 +439,8 @@ def identify_alerts(
         List of alert dicts with severity, category, and message.
     """
     t = {**ALERT_THRESHOLDS, **(thresholds or {})}
-    alerts = []
-
-    # SMA crossover signals
-    for symbol, tech in technicals.items():
-        if "error" in tech:
-            continue
-        sma5 = tech.get("sma_5")
-        sma20 = tech.get("sma_20")
-        if sma5 is not None and sma20 is not None:
-            crossover_pct = t.get("sma_crossover_pct", 0.02)
-            if sma5 > sma20 * (1 + crossover_pct):
-                alerts.append(
-                    {
-                        "severity": "info",
-                        "category": "technical",
-                        "message": (
-                            f"{symbol}: SMA-5 ({sma5:.2f}) well above "
-                            f"SMA-20 ({sma20:.2f}) — bullish momentum"
-                        ),
-                    }
-                )
-            elif sma5 < sma20 * (1 - crossover_pct):
-                alerts.append(
-                    {
-                        "severity": "warning",
-                        "category": "technical",
-                        "message": (
-                            f"{symbol}: SMA-5 ({sma5:.2f}) well below "
-                            f"SMA-20 ({sma20:.2f}) — bearish signal"
-                        ),
-                    }
-                )
-
-        # Volume surge
-        vol_ratio = tech.get("volume_trend_ratio")
-        if vol_ratio is not None and vol_ratio > t.get("volume_surge_ratio", 2.0):
-            alerts.append(
-                {
-                    "severity": "info",
-                    "category": "volume",
-                    "message": f"{symbol}: Volume surge detected ({vol_ratio:.1f}x 20d average)",
-                }
-            )
-
-        # Significant drawdown
-        drawdown = tech.get("max_drawdown_pct")
-        if drawdown is not None and drawdown < t.get("drawdown_pct", -15):
-            alerts.append(
-                {
-                    "severity": "warning",
-                    "category": "risk",
-                    "message": f"{symbol}: Max drawdown of {drawdown:.1f}% in lookback period",
-                }
-            )
-
-    # Price movement alerts
-    if portfolio_snapshot:
-        stock_threshold = t.get("price_move_stock_pct", 5.0)
-        etf_threshold = t.get("price_move_etf_pct", 3.0)
-        for item in portfolio_snapshot:
-            chg = item.get("change_pct")
-            if chg is None:
-                continue
-            sym = item["symbol"]
-            threshold = etf_threshold if sym in ETF_SYMBOLS else stock_threshold
-            if abs(chg) > threshold:
-                direction = "up" if chg > 0 else "down"
-                alerts.append(
-                    {
-                        "severity": "warning",
-                        "category": "price",
-                        "message": (
-                            f"{sym}: {direction} {abs(chg):.1f}% — exceeds {threshold}% threshold"
-                        ),
-                    }
-                )
-
-    # Valuation alerts — flag symbols with PE well below median
-    if valuations:
-        pe_values = [
-            v["pe_ratio"] for v in valuations if v.get("pe_ratio") is not None and v["pe_ratio"] > 0
-        ]
-        if pe_values:
-            pe_values_sorted = sorted(pe_values)
-            mid = len(pe_values_sorted) // 2
-            if len(pe_values_sorted) % 2 == 0 and len(pe_values_sorted) >= 2:
-                median_pe = (pe_values_sorted[mid - 1] + pe_values_sorted[mid]) / 2
-            else:
-                median_pe = pe_values_sorted[mid]
-            discount_pct = t.get("valuation_pe_discount_pct", 20)
-            cutoff = median_pe * (1 - discount_pct / 100)
-            for v in valuations:
-                pe = v.get("pe_ratio")
-                if pe is not None and 0 < pe < cutoff:
-                    alerts.append(
-                        {
-                            "severity": "info",
-                            "category": "valuation",
-                            "message": (
-                                f"{v['symbol']}: PE {pe:.1f} is "
-                                f"{((median_pe - pe) / median_pe * 100):.0f}% below "
-                                f"peer median ({median_pe:.1f})"
-                            ),
-                        }
-                    )
-
-    # Correlation alert
-    if risk_summary:
-        avg_corr = risk_summary.get("portfolio", {}).get("avg_pairwise_correlation")
-        if avg_corr is not None and avg_corr > t.get("correlation_high", 0.7):
-            alerts.append(
-                {
-                    "severity": "warning",
-                    "category": "risk",
-                    "message": (
-                        f"Portfolio avg pairwise correlation is {avg_corr:.2f} — "
-                        f"high concentration risk"
-                    ),
-                }
-            )
-
-    # Macro alerts
-    if macro_snapshot.get("yield_curve_status") == "inverted":
-        alerts.append(
-            {
-                "severity": "warning",
-                "category": "macro",
-                "message": "Yield curve inverted — historically associated with recessions",
-            }
-        )
-
-    if macro_snapshot.get("vix_regime") == "high":
-        alerts.append(
-            {
-                "severity": "warning",
-                "category": "macro",
-                "message": "VIX in high regime — elevated market fear",
-            }
-        )
-
-    # SEC alerts — recent 8-K filings
-    recent_8k = sec_activity.get("recent_8k_activity", [])
-    if len(recent_8k) > t.get("sec_8k_count", 5):
-        alerts.append(
-            {
-                "severity": "info",
-                "category": "sec",
-                "message": f"{len(recent_8k)} recent 8-K filings — review for material events",
-            }
-        )
-
+    alerts = _technical_alerts(technicals, t)
+    alerts.extend(_price_movement_alerts(portfolio_snapshot, t))
+    alerts.extend(_valuation_alerts(valuations, t))
+    alerts.extend(_macro_and_risk_alerts(macro_snapshot, sec_activity, risk_summary, t))
     return alerts

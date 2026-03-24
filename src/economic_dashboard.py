@@ -20,6 +20,39 @@ from retry import retry_fetch
 logger = logging.getLogger(__name__)
 
 
+def _normalize_date_col(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure the DataFrame has a 'date' column (from index or aliased columns)."""
+    if isinstance(df.index, pd.DatetimeIndex) or df.index.name in ("date", "Date", "period"):
+        df = df.reset_index()
+    for col in list(df.columns):
+        if col.lower() in ("date", "period") and col != "date":
+            df = df.rename(columns={col: "date"})
+            break
+    return df
+
+
+def _normalize_value_col(df: pd.DataFrame, series_id: str) -> pd.DataFrame:
+    """Ensure the DataFrame has a 'value' column (from known aliases or first numeric)."""
+    if "value" in df.columns:
+        return df
+    candidates = []
+    if series_id and series_id in df.columns:
+        candidates.append(series_id)
+    candidates.extend(["close", "Close", "Value", "rate", "Rate"])
+    for c in candidates:
+        if c in df.columns:
+            return df.rename(columns={c: "value"})
+    exclude = {"series_id", "fetched_at", "date"}
+    numeric = [c for c in df.select_dtypes(include="number").columns if c not in exclude]
+    if numeric:
+        return df.rename(columns={numeric[0]: "value"})
+    logger.warning(
+        "No numeric column found for 'value' in DataFrame with columns: %s",
+        list(df.columns),
+    )
+    return df
+
+
 def _normalize_dataframe(df: pd.DataFrame, series_id: str = "") -> pd.DataFrame:
     """Normalize an OpenBB DataFrame to have 'date' and 'value' columns.
 
@@ -29,40 +62,8 @@ def _normalize_dataframe(df: pd.DataFrame, series_id: str = "") -> pd.DataFrame:
     'value'.
     """
     df = df.copy()
-
-    # --- Normalize date ---
-    if isinstance(df.index, pd.DatetimeIndex) or df.index.name in ("date", "Date", "period"):
-        df = df.reset_index()
-    for col in list(df.columns):
-        if col.lower() in ("date", "period"):
-            if col != "date":
-                df = df.rename(columns={col: "date"})
-            break
-
-    # --- Normalize value ---
-    if "value" not in df.columns:
-        # Priority: series-specific column > known aliases > first numeric
-        candidates = []
-        if series_id and series_id in df.columns:
-            candidates.append(series_id)
-        candidates.extend(["close", "Close", "Value", "rate", "Rate"])
-        renamed = False
-        for c in candidates:
-            if c in df.columns:
-                df = df.rename(columns={c: "value"})
-                renamed = True
-                break
-        if not renamed:
-            exclude = {"series_id", "fetched_at", "date"}
-            numeric = [c for c in df.select_dtypes(include="number").columns if c not in exclude]
-            if numeric:
-                df = df.rename(columns={numeric[0]: "value"})
-            else:
-                logger.warning(
-                    "No numeric column found for 'value' in DataFrame with columns: %s",
-                    list(df.columns),
-                )
-
+    df = _normalize_date_col(df)
+    df = _normalize_value_col(df, series_id)
     return df
 
 

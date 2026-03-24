@@ -165,16 +165,8 @@ def run_quick_test():
     logger.info("=" * 70)
 
 
-def run_daily_report():
-    """Generate a daily report from existing DB data."""
-    logger.info("=" * 70)
-    logger.info("Daily Report Generation")
-    logger.info("=" * 70)
-
-    db = Database()
-    all_symbols = sorted(set(s for symbols in WATCHLIST.values() for s in symbols))
-
-    # 1. Portfolio overview
+def _build_portfolio_overview(db, all_symbols):
+    """Build portfolio overview with price changes from DB data."""
     overview_df = db.get_latest_prices_batch_with_previous(all_symbols)
     symbol_sector = {}
     for category, symbols in WATCHLIST.items():
@@ -201,30 +193,11 @@ def run_daily_report():
                     "change_pct": change_pct,
                 }
             )
+    return portfolio_overview
 
-    # 2. Technicals
-    technicals = {}
-    for sym in all_symbols:
-        df = db.get_latest_prices(sym, 90)
-        if not df.empty:
-            df = df.drop(columns=["id", "fetched_at"], errors="ignore")
-            technicals[sym] = compute_price_technicals(df, sym)
 
-    # 3. Valuations
-    fund_df = db.get_all_fundamentals()
-    valuations = compute_valuation_screen(fund_df)
-
-    # 4. Risk
-    prices_df = db.get_price_history_batch(all_symbols, days=90)
-    risk_summary = compute_portfolio_risk(prices_df, WATCHLIST)
-
-    # 5. Macro
-    histories = {}
-    for series_id in ECONOMIC_INDICATORS:
-        histories[series_id] = db.get_economic_indicator_history(series_id, days=365)
-    macro_snapshot = compute_macro_snapshot(histories)
-
-    # 6. SEC activity
+def _fetch_sec_activity(all_symbols):
+    """Query SEC filings and compute activity summary."""
     placeholders = ", ".join(["?"] * len(all_symbols))
     query = f"""
         SELECT symbol, filing_date, report_type, primary_doc_description
@@ -234,9 +207,38 @@ def run_daily_report():
     """
     with sqlite3.connect(DB_PATH) as conn:
         filings_df = pd.read_sql_query(query, conn, params=all_symbols)
-    sec_activity = compute_sec_activity(filings_df, days=90)
+    return compute_sec_activity(filings_df, days=90)
 
-    # Generate report
+
+def run_daily_report():
+    """Generate a daily report from existing DB data."""
+    logger.info("=" * 70)
+    logger.info("Daily Report Generation")
+    logger.info("=" * 70)
+
+    db = Database()
+    all_symbols = sorted(set(s for symbols in WATCHLIST.values() for s in symbols))
+
+    portfolio_overview = _build_portfolio_overview(db, all_symbols)
+
+    technicals = {}
+    for sym in all_symbols:
+        df = db.get_latest_prices(sym, 90)
+        if not df.empty:
+            df = df.drop(columns=["id", "fetched_at"], errors="ignore")
+            technicals[sym] = compute_price_technicals(df, sym)
+
+    valuations = compute_valuation_screen(db.get_all_fundamentals())
+    risk_summary = compute_portfolio_risk(
+        db.get_price_history_batch(all_symbols, days=90), WATCHLIST
+    )
+
+    histories = {
+        sid: db.get_economic_indicator_history(sid, days=365) for sid in ECONOMIC_INDICATORS
+    }
+    macro_snapshot = compute_macro_snapshot(histories)
+    sec_activity = _fetch_sec_activity(all_symbols)
+
     report_date = datetime.now().strftime("%Y-%m-%d")
     report = generate_daily_report(
         portfolio_overview=portfolio_overview,
@@ -247,20 +249,55 @@ def run_daily_report():
         sec_activity=sec_activity,
         report_date=report_date,
     )
-    md = format_report_markdown(report)
 
-    # Write to file
     report_path = REPORTS_DIR / f"{report_date}.md"
-    report_path.write_text(md, encoding="utf-8")
+    report_path.write_text(format_report_markdown(report), encoding="utf-8")
     logger.info("Report written to: %s", report_path)
     logger.info("Report date: %s", report_date)
+
+
+def _run_prices():
+    logger.info("Running prices update...")
+    WatchlistFetcher().update_all_prices()
+
+
+def _run_fundamentals():
+    logger.info("Running fundamentals update...")
+    WatchlistFetcher().update_all_fundamentals()
+
+
+def _run_sec():
+    logger.info("Running SEC filings update...")
+    WatchlistFetcher().update_all_sec_filings()
+
+
+def _run_economic():
+    logger.info("Running economic indicators update...")
+    EconomicDashboard().update_all_indicators()
+
+
+def _run_daily():
+    run_full_pipeline()
+    run_daily_report()
+
+
+_MODE_DISPATCH = {
+    "full": "run_full_pipeline",
+    "test": "run_quick_test",
+    "prices": "_run_prices",
+    "fundamentals": "_run_fundamentals",
+    "sec": "_run_sec",
+    "economic": "_run_economic",
+    "report": "run_daily_report",
+    "daily": "_run_daily",
+}
 
 
 def main():
     parser = argparse.ArgumentParser(description="OpenBB Financial Data Pipeline")
     parser.add_argument(
         "mode",
-        choices=["full", "test", "prices", "fundamentals", "sec", "economic", "report", "daily"],
+        choices=list(_MODE_DISPATCH),
         default="test",
         nargs="?",
         help="Pipeline mode to run",
@@ -268,38 +305,13 @@ def main():
 
     args = parser.parse_args()
 
-    # Configure logging for CLI usage
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    if args.mode == "full":
-        run_full_pipeline()
-    elif args.mode == "test":
-        run_quick_test()
-    elif args.mode == "prices":
-        logger.info("Running prices update...")
-        fetcher = WatchlistFetcher()
-        fetcher.update_all_prices()
-    elif args.mode == "fundamentals":
-        logger.info("Running fundamentals update...")
-        fetcher = WatchlistFetcher()
-        fetcher.update_all_fundamentals()
-    elif args.mode == "sec":
-        logger.info("Running SEC filings update...")
-        fetcher = WatchlistFetcher()
-        fetcher.update_all_sec_filings()
-    elif args.mode == "economic":
-        logger.info("Running economic indicators update...")
-        dashboard = EconomicDashboard()
-        dashboard.update_all_indicators()
-    elif args.mode == "report":
-        run_daily_report()
-    elif args.mode == "daily":
-        run_full_pipeline()
-        run_daily_report()
+    globals()[_MODE_DISPATCH[args.mode]]()
 
 
 if __name__ == "__main__":

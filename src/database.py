@@ -310,6 +310,34 @@ class Database:
         "trading_currency",
     }
 
+    @staticmethod
+    def _split_known_extra(row, known_cols: set, skip_cols: set) -> tuple[dict, dict]:
+        """Split a DataFrame row into known column values and extra data."""
+        known_values = {}
+        extra = {}
+        for col, val in row.items():
+            if col in skip_cols:
+                continue
+            if col in known_cols:
+                known_values[col] = None if pd.isna(val) else val
+            elif not pd.isna(val):
+                extra[col] = val
+        return known_values, extra
+
+    @staticmethod
+    def _upsert_row(
+        conn, table: str, prefix_cols: list[str], prefix_vals: list, known_values: dict, extra: dict
+    ):
+        """Execute an INSERT OR REPLACE for a single row with known + extra_data columns."""
+        cols = prefix_cols + list(known_values.keys()) + ["extra_data"]
+        placeholders = ", ".join(["?"] * len(cols))
+        col_names = ", ".join(cols)
+        values = prefix_vals + list(known_values.values()) + [json.dumps(extra) if extra else None]
+        conn.execute(
+            f"INSERT OR REPLACE INTO {table} ({col_names}) VALUES ({placeholders})",
+            values,
+        )
+
     def save_fundamentals(self, df: pd.DataFrame, symbol: str):
         """Save fundamentals data with fixed schema.  Extra columns are
         stored as JSON in ``extra_data``."""
@@ -320,33 +348,17 @@ class Database:
         df["symbol"] = symbol
         df["snapshot_date"] = datetime.now().strftime("%Y-%m-%d")
 
+        skip = {"symbol", "snapshot_date", "id", "fetched_at"}
         with sqlite3.connect(self.db_path) as conn:
             for _, row in df.iterrows():
-                known_values = {}
-                extra = {}
-                for col, val in row.items():
-                    if col in ("symbol", "snapshot_date"):
-                        continue
-                    if col in ("id", "fetched_at"):
-                        continue
-                    if col in self._FUNDAMENTALS_KNOWN_COLS:
-                        known_values[col] = None if pd.isna(val) else val
-                    else:
-                        if not pd.isna(val):
-                            extra[col] = val
-
-                cols = ["symbol", "snapshot_date"] + list(known_values.keys()) + ["extra_data"]
-                placeholders = ", ".join(["?"] * len(cols))
-                col_names = ", ".join(cols)
-                values = (
-                    [symbol, row["snapshot_date"]]
-                    + list(known_values.values())
-                    + [json.dumps(extra) if extra else None]
-                )
-
-                conn.execute(
-                    f"INSERT OR REPLACE INTO fundamentals ({col_names}) VALUES ({placeholders})",
-                    values,
+                known, extra = self._split_known_extra(row, self._FUNDAMENTALS_KNOWN_COLS, skip)
+                self._upsert_row(
+                    conn,
+                    "fundamentals",
+                    ["symbol", "snapshot_date"],
+                    [symbol, row["snapshot_date"]],
+                    known,
+                    extra,
                 )
             conn.commit()
 
@@ -365,6 +377,32 @@ class Database:
         "primary_doc_description",
     }
 
+    def _clean_sec_dates(self, df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """Coerce SEC date columns to strings and drop rows missing required fields."""
+        for col in ["filing_date", "report_date", "accepted_date"]:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime("%Y-%m-%d")
+                df[col] = df[col].replace("NaT", None)
+
+        for col, label in [
+            ("filing_date", "invalid filing_date"),
+            ("accession_number", "null accession_number"),
+        ]:
+            if col not in df.columns:
+                if col == "accession_number":
+                    logger.warning(
+                        "SEC filings for %s missing accession_number column, skipping", symbol
+                    )
+                    return pd.DataFrame()
+                continue
+            before_len = len(df)
+            df = df.dropna(subset=[col])
+            if len(df) < before_len:
+                logger.warning(
+                    "Dropped %d rows with %s for %s", before_len - len(df), label, symbol
+                )
+        return df
+
     def save_sec_filings(self, df: pd.DataFrame, symbol: str):
         """Save SEC filings with fixed schema.  Extra columns stored as JSON."""
         if df is None or df.empty:
@@ -372,66 +410,15 @@ class Database:
 
         df = df.copy()
         df["symbol"] = symbol
-
-        # Ensure date columns are strings (coerce invalid dates to NaT)
-        for col in ["filing_date", "report_date", "accepted_date"]:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime("%Y-%m-%d")
-                # Replace pandas "NaT" string (from strftime on NaT) with None
-                df[col] = df[col].replace("NaT", None)
-
-        # filing_date is NOT NULL in schema — drop rows without it
-        if "filing_date" in df.columns:
-            before_len = len(df)
-            df = df.dropna(subset=["filing_date"])
-            if len(df) < before_len:
-                logger.warning(
-                    "Dropped %d rows with invalid filing_date for %s",
-                    before_len - len(df),
-                    symbol,
-                )
-
-        # accession_number is NOT NULL in schema — drop rows without it
-        if "accession_number" in df.columns:
-            before_len = len(df)
-            df = df.dropna(subset=["accession_number"])
-            if len(df) < before_len:
-                logger.warning(
-                    "Dropped %d rows with null accession_number for %s",
-                    before_len - len(df),
-                    symbol,
-                )
-        else:
-            logger.warning("SEC filings for %s missing accession_number column, skipping", symbol)
-            return
-
+        df = self._clean_sec_dates(df, symbol)
         if df.empty:
             return
 
+        skip = {"symbol", "id", "fetched_at"}
         with sqlite3.connect(self.db_path) as conn:
             for _, row in df.iterrows():
-                known_values = {}
-                extra = {}
-                for col, val in row.items():
-                    if col in ("symbol", "id", "fetched_at"):
-                        continue
-                    if col in self._SEC_KNOWN_COLS:
-                        known_values[col] = None if pd.isna(val) else val
-                    else:
-                        if not pd.isna(val):
-                            extra[col] = val
-
-                cols = ["symbol"] + list(known_values.keys()) + ["extra_data"]
-                placeholders = ", ".join(["?"] * len(cols))
-                col_names = ", ".join(cols)
-                values = (
-                    [symbol] + list(known_values.values()) + [json.dumps(extra) if extra else None]
-                )
-
-                conn.execute(
-                    f"INSERT OR REPLACE INTO sec_filings ({col_names}) VALUES ({placeholders})",
-                    values,
-                )
+                known, extra = self._split_known_extra(row, self._SEC_KNOWN_COLS, skip)
+                self._upsert_row(conn, "sec_filings", ["symbol"], [symbol], known, extra)
             conn.commit()
 
     # ==================================================================

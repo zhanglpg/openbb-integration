@@ -414,6 +414,81 @@ def compute_portfolio_risk(prices_df: pd.DataFrame, watchlist: dict) -> dict:
     }
 
 
+def _latest_value(histories: dict[str, pd.DataFrame], series_id: str) -> float | None:
+    """Get the latest value from an indicator history series."""
+    df = histories.get(series_id)
+    if df is None or df.empty or "value" not in df.columns:
+        return None
+    return float(df.sort_values("date").iloc[-1]["value"])
+
+
+def _assess_yield_curve(histories: dict[str, pd.DataFrame]) -> str | None:
+    """Assess yield curve status from T10Y2Y spread."""
+    spread = _latest_value(histories, "T10Y2Y")
+    if spread is None:
+        return None
+    if spread < -0.1:
+        return "inverted"
+    return "normal" if spread > 0.1 else "flat"
+
+
+def _assess_vix_regime(histories: dict[str, pd.DataFrame]) -> str | None:
+    """Classify VIX into low/medium/high regime."""
+    vix_val = _latest_value(histories, "VIXCLS")
+    if vix_val is None:
+        return None
+    if vix_val < 15:
+        return "low"
+    return "medium" if vix_val < 25 else "high"
+
+
+def _assess_rate_direction(histories: dict[str, pd.DataFrame]) -> str | None:
+    """Determine whether the fed funds rate is rising, falling, or stable."""
+    ff = histories.get("FEDFUNDS")
+    if ff is None or ff.empty or "value" not in ff.columns:
+        return None
+    ff_sorted = ff.sort_values("date")
+    if len(ff_sorted) < 2:
+        return None
+    diff = float(ff_sorted.iloc[-1]["value"]) - float(ff_sorted.iloc[-2]["value"])
+    if diff > 0.1:
+        return "rising"
+    return "falling" if diff < -0.1 else "stable"
+
+
+def _build_indicator_trends(indicator_histories: dict[str, pd.DataFrame]) -> list[dict]:
+    """Build per-indicator trend summaries with period changes."""
+    indicators = []
+    for series_id, df in indicator_histories.items():
+        if df.empty or "value" not in df.columns:
+            continue
+        df = df.sort_values("date").reset_index(drop=True)
+        df["date"] = pd.to_datetime(df["date"])
+        latest = df.iloc[-1]
+        latest_val = float(latest["value"])
+        latest_date = latest["date"]
+
+        def _change_over(months, _val=latest_val, _date=latest_date, _df=df):
+            cutoff = _date - timedelta(days=months * 30)
+            past = _df[_df["date"] <= cutoff]
+            if past.empty:
+                return None
+            return round(_val - float(past.iloc[-1]["value"]), 4)
+
+        indicators.append(
+            {
+                "series_id": series_id,
+                "latest_value": latest_val,
+                "latest_date": latest_date.strftime("%Y-%m-%d"),
+                "change_1m": _change_over(1),
+                "change_3m": _change_over(3),
+                "change_6m": _change_over(6),
+                "change_1y": _change_over(12),
+            }
+        )
+    return indicators
+
+
 def compute_macro_snapshot(indicator_histories: dict[str, pd.DataFrame]) -> dict:
     """Compute macro trend analysis from economic indicator time series.
 
@@ -431,81 +506,143 @@ def compute_macro_snapshot(indicator_histories: dict[str, pd.DataFrame]) -> dict
             "rate_direction": None,
         }
 
-    indicators = []
-    for series_id, df in indicator_histories.items():
-        if df.empty or "value" not in df.columns:
-            continue
-        df = df.sort_values("date").reset_index(drop=True)
-        df["date"] = pd.to_datetime(df["date"])
-        latest = df.iloc[-1]
-        latest_val = float(latest["value"])
-        latest_date = latest["date"]
-
-        def _change_over(months):
-            cutoff = latest_date - timedelta(days=months * 30)
-            past = df[df["date"] <= cutoff]
-            if past.empty:
-                return None
-            return round(latest_val - float(past.iloc[-1]["value"]), 4)
-
-        indicators.append(
-            {
-                "series_id": series_id,
-                "latest_value": latest_val,
-                "latest_date": latest_date.strftime("%Y-%m-%d"),
-                "change_1m": _change_over(1),
-                "change_3m": _change_over(3),
-                "change_6m": _change_over(6),
-                "change_1y": _change_over(12),
-            }
-        )
-
-    # Yield curve status (T10Y2Y spread)
-    yield_curve_status = None
-    t10y2y = indicator_histories.get("T10Y2Y")
-    if t10y2y is not None and not t10y2y.empty and "value" in t10y2y.columns:
-        spread = float(t10y2y.sort_values("date").iloc[-1]["value"])
-        if spread < -0.1:
-            yield_curve_status = "inverted"
-        elif spread > 0.1:
-            yield_curve_status = "normal"
-        else:
-            yield_curve_status = "flat"
-
-    # VIX regime
-    vix_regime = None
-    vix = indicator_histories.get("VIXCLS")
-    if vix is not None and not vix.empty and "value" in vix.columns:
-        vix_val = float(vix.sort_values("date").iloc[-1]["value"])
-        if vix_val < 15:
-            vix_regime = "low"
-        elif vix_val < 25:
-            vix_regime = "medium"
-        else:
-            vix_regime = "high"
-
-    # Rate direction (FEDFUNDS)
-    rate_direction = None
-    ff = indicator_histories.get("FEDFUNDS")
-    if ff is not None and not ff.empty and "value" in ff.columns:
-        ff_sorted = ff.sort_values("date")
-        if len(ff_sorted) >= 2:
-            recent = float(ff_sorted.iloc[-1]["value"])
-            prev = float(ff_sorted.iloc[-2]["value"])
-            diff = recent - prev
-            if diff > 0.1:
-                rate_direction = "rising"
-            elif diff < -0.1:
-                rate_direction = "falling"
-            else:
-                rate_direction = "stable"
-
     return {
-        "indicators": indicators,
-        "yield_curve_status": yield_curve_status,
-        "vix_regime": vix_regime,
-        "rate_direction": rate_direction,
+        "indicators": _build_indicator_trends(indicator_histories),
+        "yield_curve_status": _assess_yield_curve(indicator_histories),
+        "vix_regime": _assess_vix_regime(indicator_histories),
+        "rate_direction": _assess_rate_direction(indicator_histories),
     }
+
+
+def _find_close_price(pdf: pd.DataFrame, pe_date) -> float | None:
+    """Find the closest trading-day close price near a quarter-end date."""
+    mask = (pdf["date"] >= pe_date) & (pdf["date"] <= pe_date + pd.Timedelta(days=10))
+    if mask.any():
+        return pdf.loc[mask, "close"].iloc[0]
+    before = pdf[pdf["date"] <= pe_date]
+    if before.empty:
+        return None
+    return before["close"].iloc[-1]
+
+
+def _resolve_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    """Return the first column name from candidates that exists in df."""
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+
+def _safe_positive(value) -> float | None:
+    """Return value as float if it's a positive, non-NaN number, else None."""
+    if value is None or (isinstance(value, float) and pd.isna(value)) or value <= 0:
+        return None
+    return float(value)
+
+
+def _compute_implied_shares(inc_row, eps, fx_rate: float) -> float | None:
+    """Derive price-consistent share count from net_income / EPS for ADR adjustments."""
+    if fx_rate == 1.0:
+        return None
+    net_inc = inc_row.get("net_income")
+    if (
+        eps is not None
+        and not pd.isna(eps)
+        and eps != 0
+        and net_inc is not None
+        and not pd.isna(net_inc)
+        and net_inc != 0
+    ):
+        return abs(net_inc / eps)
+    return None
+
+
+def _compute_pe(close_price: float, eps, fx_rate: float) -> float | None:
+    """Compute PE ratio from close price and TTM EPS."""
+    if eps is not None and not pd.isna(eps) and eps != 0:
+        return round(close_price / (eps / fx_rate), 2)
+    return None
+
+
+def _compute_pb(
+    bal_row,
+    close_price: float,
+    implied_shares: float | None,
+    equity_col: str,
+    shares_col: str,
+    fx_rate: float,
+) -> float | None:
+    """Compute price-to-book from balance sheet row."""
+    equity = bal_row.get(equity_col)
+    shares = _safe_positive(bal_row.get(shares_col))
+    if equity is None or pd.isna(equity) or shares is None:
+        return None
+    pb_shares = implied_shares if implied_shares else shares
+    bvps = equity / pb_shares / fx_rate
+    if bvps > 0:
+        return round(close_price / bvps, 2)
+    return None
+
+
+def _compute_ev_ebitda(
+    bal_row,
+    close_price: float,
+    ebitda_ttm,
+    implied_shares: float | None,
+    shares_col: str,
+    fx_rate: float,
+) -> float | None:
+    """Compute EV/EBITDA from balance sheet row and TTM EBITDA."""
+    shares_val = _safe_positive(bal_row.get(shares_col))
+    ebitda = _safe_positive(ebitda_ttm)
+    if shares_val is None or ebitda is None:
+        return None
+    mc_shares = implied_shares if implied_shares else shares_val
+    market_cap = close_price * mc_shares
+    debt_val = bal_row.get("total_debt")
+    cash_val = bal_row.get("cash_and_cash_equivalents")
+    debt_num = debt_val / fx_rate if debt_val and not pd.isna(debt_val) else 0
+    cash_num = cash_val / fx_rate if cash_val and not pd.isna(cash_val) else 0
+    ev = market_cap + debt_num - cash_num
+    return round(ev / (ebitda / fx_rate), 2)
+
+
+def _compute_fcf_yield(
+    cf_ttm: pd.DataFrame,
+    bal: pd.DataFrame,
+    pe_date,
+    close_price: float,
+    implied_shares: float | None,
+    fx_rate: float,
+) -> float | None:
+    """Compute FCF yield from TTM cash flow and balance sheet."""
+    if cf_ttm.empty or "free_cash_flow" not in cf_ttm.columns or bal.empty:
+        return None
+    cf_match = cf_ttm[cf_ttm["period_ending"] == pe_date]
+    if cf_match.empty:
+        return None
+    fcf = cf_match.iloc[0].get("free_cash_flow")
+    bal_match = bal[bal["period_ending"] == pe_date]
+    shares_col = _resolve_col(bal, ["common_stock_shares_outstanding", "share_issued"])
+    if bal_match.empty or not shares_col:
+        return None
+    shares_val = _safe_positive(bal_match.iloc[0].get(shares_col))
+    if fcf is None or pd.isna(fcf) or shares_val is None:
+        return None
+    mc_shares = implied_shares if implied_shares else shares_val
+    market_cap = close_price * mc_shares
+    if market_cap > 0:
+        return round((fcf / fx_rate) / market_cap * 100, 2)
+    return None
+
+
+def _prepare_quarterly_df(df: pd.DataFrame | None) -> pd.DataFrame:
+    """Normalize a quarterly DataFrame: parse dates, sort, return empty DF if invalid."""
+    if df is None or df.empty or "period_ending" not in df.columns:
+        return pd.DataFrame()
+    out = df.copy()
+    out["period_ending"] = pd.to_datetime(out["period_ending"])
+    return out.sort_values("period_ending").reset_index(drop=True)
 
 
 def compute_historical_valuations(
@@ -536,182 +673,78 @@ def compute_historical_valuations(
         DataFrame with columns: period_ending, pe, pb, ev_ebitda, fcf_yield,
         plus the underlying components.  Rows sorted by period_ending ascending.
     """
-    if income_df is None or income_df.empty:
-        return pd.DataFrame()
-    if price_df is None or price_df.empty:
+    if income_df is None or income_df.empty or price_df is None or price_df.empty:
         return pd.DataFrame()
 
-    # Prepare price series for lookups
     pdf = price_df.copy()
     pdf["date"] = pd.to_datetime(pdf["date"])
     pdf = pdf.sort_values("date")
 
-    # Prepare income (need TTM for flow metrics)
-    inc = income_df.copy()
-    if "period_ending" not in inc.columns:
+    inc = _prepare_quarterly_df(income_df)
+    if inc.empty:
         return pd.DataFrame()
-    inc["period_ending"] = pd.to_datetime(inc["period_ending"])
-    inc = inc.sort_values("period_ending").reset_index(drop=True)
 
-    # Build TTM income
-    ttm_cols = ["net_income", "ebitda", "diluted_earnings_per_share", "total_revenue"]
-    ttm_cols = [c for c in ttm_cols if c in inc.columns]
+    ttm_cols = [
+        c
+        for c in ["net_income", "ebitda", "diluted_earnings_per_share", "total_revenue"]
+        if c in inc.columns
+    ]
     ttm_income = compute_ttm(inc, ttm_cols) if len(inc) >= 4 else pd.DataFrame()
+    if ttm_income.empty:
+        return pd.DataFrame()
 
-    # Prepare balance sheet
-    bal = pd.DataFrame()
-    if balance_df is not None and not balance_df.empty and "period_ending" in balance_df.columns:
-        bal = balance_df.copy()
-        bal["period_ending"] = pd.to_datetime(bal["period_ending"])
-        bal = bal.sort_values("period_ending")
-
-    # Prepare cash flow TTM
+    bal = _prepare_quarterly_df(balance_df)
+    cf = _prepare_quarterly_df(cashflow_df)
     cf_ttm = pd.DataFrame()
-    if cashflow_df is not None and not cashflow_df.empty and "period_ending" in cashflow_df.columns:
-        cf = cashflow_df.copy()
-        cf["period_ending"] = pd.to_datetime(cf["period_ending"])
-        cf = cf.sort_values("period_ending").reset_index(drop=True)
+    if not cf.empty:
         cf_sum_cols = [c for c in ["free_cash_flow"] if c in cf.columns]
         cf_ttm = compute_ttm(cf, cf_sum_cols) if len(cf) >= 4 else pd.DataFrame()
 
-    # Use TTM income dates as the base
-    if ttm_income.empty:
-        return pd.DataFrame()
+    equity_col = _resolve_col(bal, ["total_equity_non_controlling_interests", "total_equity"])
+    shares_col = _resolve_col(bal, ["common_stock_shares_outstanding", "share_issued"])
 
     rows = []
     for _, inc_row in ttm_income.iterrows():
         pe_date = inc_row["period_ending"]
+        close_price = _find_close_price(pdf, pe_date)
+        if close_price is None:
+            continue
 
-        # Find closest price (within 10 days after quarter end)
-        mask = (pdf["date"] >= pe_date) & (pdf["date"] <= pe_date + pd.Timedelta(days=10))
-        if mask.any():
-            close_price = pdf.loc[mask, "close"].iloc[0]
-        else:
-            # Fall back to last price before quarter end
-            before = pdf[pdf["date"] <= pe_date]
-            if before.empty:
-                continue
-            close_price = before["close"].iloc[-1]
-
-        row = {"period_ending": pe_date, "close_price": close_price}
-
-        # PE from TTM EPS (convert EPS to price currency via fx_rate)
         eps = inc_row.get("diluted_earnings_per_share")
-        if eps is not None and not pd.isna(eps) and eps != 0:
-            row["pe"] = round(close_price / (eps / fx_rate), 2)
-        else:
-            row["pe"] = None
+        implied_shares = _compute_implied_shares(inc_row, eps, fx_rate)
 
-        # When currencies differ, balance sheet shares (ordinary) may not match
-        # the price basis (e.g. ADS for ADRs).  Derive price-consistent share
-        # count from net_income / EPS so that PB, EV/EBITDA and FCF yield use
-        # the same per-share unit as close_price.
-        implied_shares = None
-        if fx_rate != 1.0:
-            net_inc = inc_row.get("net_income")
-            if (
-                eps is not None
-                and not pd.isna(eps)
-                and eps != 0
-                and net_inc is not None
-                and not pd.isna(net_inc)
-                and net_inc != 0
-            ):
-                implied_shares = abs(net_inc / eps)
+        row = {
+            "period_ending": pe_date,
+            "close_price": close_price,
+            "pe": _compute_pe(close_price, eps, fx_rate),
+            "ev_ebitda": None,
+            "pb": None,
+            "fcf_yield": _compute_fcf_yield(
+                cf_ttm, bal, pe_date, close_price, implied_shares, fx_rate
+            ),
+        }
 
-        # PB from balance sheet
-        if not bal.empty:
+        if not bal.empty and equity_col and shares_col:
             bal_match = bal[bal["period_ending"] == pe_date]
             if not bal_match.empty:
-                equity_col = (
-                    "total_equity_non_controlling_interests"
-                    if "total_equity_non_controlling_interests" in bal.columns
-                    else "total_equity"
-                    if "total_equity" in bal.columns
-                    else None
+                bal_row = bal_match.iloc[0]
+                row["pb"] = _compute_pb(
+                    bal_row, close_price, implied_shares, equity_col, shares_col, fx_rate
                 )
-                shares_col = (
-                    "common_stock_shares_outstanding"
-                    if "common_stock_shares_outstanding" in bal.columns
-                    else "share_issued"
-                    if "share_issued" in bal.columns
-                    else None
+                row["ev_ebitda"] = _compute_ev_ebitda(
+                    bal_row,
+                    close_price,
+                    inc_row.get("ebitda"),
+                    implied_shares,
+                    shares_col,
+                    fx_rate,
                 )
-                if equity_col and shares_col:
-                    equity = bal_match.iloc[0].get(equity_col)
-                    shares = bal_match.iloc[0].get(shares_col)
-                    if (
-                        equity is not None
-                        and shares is not None
-                        and not pd.isna(equity)
-                        and not pd.isna(shares)
-                        and shares > 0
-                    ):
-                        pb_shares = implied_shares if implied_shares else shares
-                        bvps = equity / pb_shares / fx_rate
-                        if bvps > 0:
-                            row["pb"] = round(close_price / bvps, 2)
 
-                # EV/EBITDA (debt, cash, ebitda all in reporting currency)
-                debt_val = bal_match.iloc[0].get("total_debt")
-                cash_val = bal_match.iloc[0].get("cash_and_cash_equivalents")
-                ebitda_ttm = inc_row.get("ebitda")
-                if shares_col:
-                    shares_val = bal_match.iloc[0].get(shares_col)
-                    if (
-                        shares_val
-                        and not pd.isna(shares_val)
-                        and shares_val > 0
-                        and ebitda_ttm
-                        and not pd.isna(ebitda_ttm)
-                        and ebitda_ttm > 0
-                    ):
-                        mc_shares = implied_shares if implied_shares else shares_val
-                        market_cap = close_price * mc_shares
-                        debt_num = debt_val / fx_rate if debt_val and not pd.isna(debt_val) else 0
-                        cash_num = cash_val / fx_rate if cash_val and not pd.isna(cash_val) else 0
-                        ev = market_cap + debt_num - cash_num
-                        row["ev_ebitda"] = round(ev / (ebitda_ttm / fx_rate), 2)
-
-        # FCF Yield from TTM cash flow
-        if not cf_ttm.empty:
-            cf_match = cf_ttm[cf_ttm["period_ending"] == pe_date]
-            if not cf_match.empty and "free_cash_flow" in cf_ttm.columns:
-                fcf = cf_match.iloc[0].get("free_cash_flow")
-                if not bal.empty:
-                    bal_match2 = bal[bal["period_ending"] == pe_date]
-                    shares_col2 = (
-                        "common_stock_shares_outstanding"
-                        if "common_stock_shares_outstanding" in bal.columns
-                        else "share_issued"
-                        if "share_issued" in bal.columns
-                        else None
-                    )
-                    if not bal_match2.empty and shares_col2:
-                        shares_val2 = bal_match2.iloc[0].get(shares_col2)
-                        if (
-                            fcf is not None
-                            and not pd.isna(fcf)
-                            and shares_val2
-                            and not pd.isna(shares_val2)
-                            and shares_val2 > 0
-                        ):
-                            mc_shares2 = implied_shares if implied_shares else shares_val2
-                            market_cap2 = close_price * mc_shares2
-                            if market_cap2 > 0:
-                                row["fcf_yield"] = round((fcf / fx_rate) / market_cap2 * 100, 2)
-
-        row.setdefault("pe", None)
-        row.setdefault("pb", None)
-        row.setdefault("ev_ebitda", None)
-        row.setdefault("fcf_yield", None)
         rows.append(row)
 
     if not rows:
         return pd.DataFrame()
-
-    result = pd.DataFrame(rows).sort_values("period_ending").reset_index(drop=True)
-    return result
+    return pd.DataFrame(rows).sort_values("period_ending").reset_index(drop=True)
 
 
 def compute_growth_rates(income_df: pd.DataFrame) -> pd.DataFrame:
@@ -779,6 +812,14 @@ def normalize_price_series(price_dfs: dict[str, pd.DataFrame], base: float = 100
     return pd.DataFrame(series).sort_index()
 
 
+def _find_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    """Return the first column name from candidates that exists in df."""
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+
 def summarize_insider_activity(trades_df: pd.DataFrame) -> dict:
     """Summarize insider trading activity.
 
@@ -795,65 +836,72 @@ def summarize_insider_activity(trades_df: pd.DataFrame) -> dict:
 
     df = trades_df.copy()
 
-    # Normalize date column
-    date_col = None
-    for c in ["transaction_date", "filing_date", "date"]:
-        if c in df.columns:
-            date_col = c
-            break
+    date_col = _find_col(df, ["transaction_date", "filing_date", "date"])
     if date_col:
         df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
         df = df.sort_values(date_col, ascending=False)
 
-    # Count buys vs sells
-    acq_col = None
-    for c in ["acquisition_or_disposition", "transaction_type"]:
-        if c in df.columns:
-            acq_col = c
-            break
+    acq_col = _find_col(df, ["acquisition_or_disposition", "transaction_type"])
+    shares_col = _find_col(df, ["securities_transacted", "shares", "number_of_shares"])
+    owner_col = _find_col(df, ["owner_name", "reporting_owner", "insider_name"])
 
-    buys = 0
-    sells = 0
-    if acq_col:
-        buys = len(df[df[acq_col].str.upper().str.startswith("A", na=False)])
-        sells = len(df[df[acq_col].str.upper().str.startswith("D", na=False)])
+    buys, sells = _count_buys_sells(df, acq_col)
+    net_shares = _compute_net_shares(df, acq_col, shares_col)
+    top_insiders = _top_insiders(df, owner_col)
+    recent = _recent_trades(df, owner_col, date_col, acq_col, shares_col)
 
-    # Net shares
-    shares_col = None
-    for c in ["securities_transacted", "shares", "number_of_shares"]:
-        if c in df.columns:
-            shares_col = c
-            break
+    return {
+        "total_trades": len(df),
+        "buys": buys,
+        "sells": sells,
+        "net_shares": net_shares,
+        "top_insiders": top_insiders,
+        "recent_trades": recent,
+    }
 
-    net_shares = None
-    if shares_col and acq_col:
-        df["_signed_shares"] = df.apply(
-            lambda r: (
-                (
-                    r[shares_col]
-                    if str(r.get(acq_col, "")).upper().startswith("A")
-                    else -r[shares_col]
-                )
-                if pd.notna(r.get(shares_col))
-                else 0
-            ),
-            axis=1,
-        )
-        net_shares = int(df["_signed_shares"].sum())
 
-    # Top insiders
-    owner_col = None
-    for c in ["owner_name", "reporting_owner", "insider_name"]:
-        if c in df.columns:
-            owner_col = c
-            break
+def _count_buys_sells(df: pd.DataFrame, acq_col: str | None) -> tuple[int, int]:
+    """Count buy and sell transactions."""
+    if not acq_col:
+        return 0, 0
+    buys = len(df[df[acq_col].str.upper().str.startswith("A", na=False)])
+    sells = len(df[df[acq_col].str.upper().str.startswith("D", na=False)])
+    return buys, sells
 
-    top_insiders = []
-    if owner_col:
-        top = df[owner_col].value_counts().head(5)
-        top_insiders = [{"name": name, "trades": int(count)} for name, count in top.items()]
 
-    # Recent trades (last 5)
+def _compute_net_shares(
+    df: pd.DataFrame, acq_col: str | None, shares_col: str | None
+) -> int | None:
+    """Compute net shares (buys - sells)."""
+    if not shares_col or not acq_col:
+        return None
+    df["_signed_shares"] = df.apply(
+        lambda r: (
+            (r[shares_col] if str(r.get(acq_col, "")).upper().startswith("A") else -r[shares_col])
+            if pd.notna(r.get(shares_col))
+            else 0
+        ),
+        axis=1,
+    )
+    return int(df["_signed_shares"].sum())
+
+
+def _top_insiders(df: pd.DataFrame, owner_col: str | None) -> list[dict]:
+    """Return top 5 insiders by trade count."""
+    if not owner_col:
+        return []
+    top = df[owner_col].value_counts().head(5)
+    return [{"name": name, "trades": int(count)} for name, count in top.items()]
+
+
+def _recent_trades(
+    df: pd.DataFrame,
+    owner_col: str | None,
+    date_col: str | None,
+    acq_col: str | None,
+    shares_col: str | None,
+) -> list[dict]:
+    """Build list of the 5 most recent trades."""
     recent = []
     for _, row in df.head(5).iterrows():
         entry = {}
@@ -867,15 +915,7 @@ def summarize_insider_activity(trades_df: pd.DataFrame) -> dict:
             entry["shares"] = int(row[shares_col])
         if entry:
             recent.append(entry)
-
-    return {
-        "total_trades": len(df),
-        "buys": buys,
-        "sells": sells,
-        "net_shares": net_shares,
-        "top_insiders": top_insiders,
-        "recent_trades": recent,
-    }
+    return recent
 
 
 def compute_sec_activity(filings_df: pd.DataFrame, days: int = 90) -> dict:

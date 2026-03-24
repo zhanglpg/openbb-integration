@@ -143,12 +143,20 @@ def analyze_symbol_deep(
                 }
         result["peer_position"] = peer_position
 
-    # Signals
+    result["signals"] = _generate_signals(
+        result.get("technical_summary", {}),
+        result.get("fundamental_summary", {}),
+    )
+    return result
+
+
+def _generate_signals(tech_sum: dict, fund_sum: dict) -> list[str]:
+    """Generate human-readable signals from technical and fundamental summaries."""
     signals = []
-    tech_sum = result.get("technical_summary", {})
-    if tech_sum.get("trend") == "below":
+    trend = tech_sum.get("trend")
+    if trend == "below":
         signals.append("Trading below SMA-20 — potential weakness")
-    if tech_sum.get("trend") == "above":
+    elif trend == "above":
         signals.append("Trading above SMA-20 — positive momentum")
 
     vol_trend = tech_sum.get("volume_trend")
@@ -159,15 +167,13 @@ def analyze_symbol_deep(
     if drawdown is not None and drawdown < -10:
         signals.append(f"Significant drawdown: {drawdown:.1f}%")
 
-    pe = result.get("fundamental_summary", {}).get("pe_ratio")
+    pe = fund_sum.get("pe_ratio")
     if pe is not None:
         if pe < 15:
             signals.append(f"Low PE ({pe:.1f}) — potentially undervalued")
         elif pe > 50:
             signals.append(f"High PE ({pe:.1f}) — premium valuation")
-
-    result["signals"] = signals
-    return result
+    return signals
 
 
 def assess_macro_risks(
@@ -273,6 +279,44 @@ def assess_macro_risks(
     }
 
 
+def _score_opportunity(val: dict, tech: dict) -> tuple[int, list[str]]:
+    """Compute opportunity score and reasons from valuation and technical data."""
+    score = 0
+    reasons = []
+
+    if tech.get("price_vs_sma20") == "below":
+        score += 2
+        reasons.append("Below SMA-20")
+
+    total_ret = tech.get("total_return_pct")
+    if total_ret is not None and total_ret < -5:
+        score += 2
+        reasons.append(f"Down {total_ret:.1f}% recently")
+    elif total_ret is not None and total_ret < 0:
+        score += 1
+        reasons.append(f"Down {total_ret:.1f}%")
+
+    pe = val["pe_ratio"]
+    if pe < 15:
+        score += 2
+        reasons.append(f"Low PE ({pe:.1f})")
+    elif pe < 20:
+        score += 1
+        reasons.append(f"Moderate PE ({pe:.1f})")
+
+    fcf_yield = val.get("fcf_yield")
+    if fcf_yield is not None and fcf_yield > 0.05:
+        score += 1
+        reasons.append(f"Strong FCF yield ({fcf_yield:.1%})")
+
+    drawdown = tech.get("max_drawdown_pct")
+    if drawdown is not None and drawdown > -5:
+        score += 1
+        reasons.append("Limited drawdown")
+
+    return score, reasons
+
+
 def screen_opportunities(
     valuations: list[dict],
     technicals: dict[str, dict],
@@ -294,62 +338,23 @@ def screen_opportunities(
         symbol = val.get("symbol")
         if not symbol:
             continue
-
         pe = val.get("pe_ratio")
         if pe is None or pe <= 0 or pe > max_pe:
             continue
-
         tech = technicals.get(symbol, {})
         if "error" in tech:
             continue
 
-        # Score components (higher = more attractive)
-        score = 0
-        reasons = []
-
-        # Below SMA-20 = potentially oversold
-        if tech.get("price_vs_sma20") == "below":
-            score += 2
-            reasons.append("Below SMA-20")
-
-        # Negative recent return = potential value entry
-        total_ret = tech.get("total_return_pct")
-        if total_ret is not None and total_ret < -5:
-            score += 2
-            reasons.append(f"Down {total_ret:.1f}% recently")
-        elif total_ret is not None and total_ret < 0:
-            score += 1
-            reasons.append(f"Down {total_ret:.1f}%")
-
-        # Low PE
-        if pe < 15:
-            score += 2
-            reasons.append(f"Low PE ({pe:.1f})")
-        elif pe < 20:
-            score += 1
-            reasons.append(f"Moderate PE ({pe:.1f})")
-
-        # FCF yield
-        fcf_yield = val.get("fcf_yield")
-        if fcf_yield is not None and fcf_yield > 0.05:
-            score += 1
-            reasons.append(f"Strong FCF yield ({fcf_yield:.1%})")
-
-        # Low drawdown (less damaged)
-        drawdown = tech.get("max_drawdown_pct")
-        if drawdown is not None and drawdown > -5:
-            score += 1
-            reasons.append("Limited drawdown")
-
+        score, reasons = _score_opportunity(val, tech)
         if score >= 2:
             opportunities.append(
                 {
                     "symbol": symbol,
                     "score": score,
                     "pe_ratio": pe,
-                    "total_return_pct": total_ret,
+                    "total_return_pct": tech.get("total_return_pct"),
                     "price_vs_sma20": tech.get("price_vs_sma20"),
-                    "fcf_yield": fcf_yield,
+                    "fcf_yield": val.get("fcf_yield"),
                     "reasons": reasons,
                 }
             )
