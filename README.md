@@ -65,12 +65,30 @@ The dashboard can also be managed as a background service via launchctl (`~/Libr
 
 An MCP server (`src/mcp_server.py`) exposes the database as tools for Claude Code:
 
+**Data tools:**
 - `get_portfolio_overview` — Latest prices and daily change for all symbols
 - `get_price_history` — OHLCV history for a symbol
 - `get_fundamentals` — PE, market cap, EPS, revenue, etc.
 - `get_sec_filings` — Recent SEC filings
 - `get_economic_indicators` — FRED series data
 - `get_watchlist` — Current watchlist configuration
+
+**Analysis tools:**
+- `analyze_price_technicals` — Moving averages, RSI, MACD for a symbol
+- `screen_valuations` — Sort and filter by valuation metrics
+- `get_portfolio_risk_summary` — VaR, Sharpe, beta, correlations
+- `get_macro_snapshot` — Economic indicator trends
+- `get_sec_activity_summary` — Filing frequency and patterns
+
+**Report tools:**
+- `get_daily_report` — Rendered daily brief for a given date
+- `list_reports` — Available daily report files
+
+**Research tools:**
+- `compare_sector_peers` — Side-by-side category comparison
+- `deep_analyze_symbol` — Comprehensive single-symbol analysis
+- `assess_portfolio_risks` — Portfolio-wide risk assessment
+- `find_opportunities` — Screen for undervalued symbols
 
 Configured via `.mcp.json` in the project root.
 
@@ -114,6 +132,8 @@ pages/
 └── 5_Charts.py              ← Charts page (visualization)
 
 shared.py                    ← Shared Streamlit helpers
+pipeline.py                  ← Legacy CLI entry point (wraps run_pipeline)
+query.py                     ← Quick data query utility
 ```
 
 ## Data Storage
