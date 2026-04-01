@@ -13,6 +13,7 @@ from datetime import datetime
 import pandas as pd
 
 from analysis import (
+    _build_sector_mapping,
     compute_macro_snapshot,
     compute_portfolio_risk,
     compute_price_technicals,
@@ -168,11 +169,7 @@ def run_quick_test():
 def _build_portfolio_overview(db, all_symbols):
     """Build portfolio overview with price changes from DB data."""
     overview_df = db.get_latest_prices_batch_with_previous(all_symbols)
-    symbol_sector = {}
-    for category, symbols in WATCHLIST.items():
-        for s in symbols:
-            if s not in symbol_sector:
-                symbol_sector[s] = category
+    symbol_sector = _build_sector_mapping(WATCHLIST)
 
     portfolio_overview = []
     if not overview_df.empty:

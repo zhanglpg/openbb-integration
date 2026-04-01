@@ -334,6 +334,45 @@ def compute_valuation_screen(
     return df.to_dict(orient="records")
 
 
+def _build_sector_mapping(watchlist: dict) -> dict[str, str]:
+    """Build symbol → sector mapping from a watchlist dict."""
+    symbol_sector = {}
+    for category, symbols in watchlist.items():
+        for s in symbols:
+            if s not in symbol_sector:
+                symbol_sector[s] = category
+    return symbol_sector
+
+
+def _compute_symbol_risk(returns: pd.Series, symbol: str, sector: str) -> dict | None:
+    """Compute risk metrics for a single symbol's return series."""
+    r = returns.dropna()
+    if len(r) < 2:
+        return None
+    mean_ret = round(float(r.mean()), 6)
+    vol = round(float(r.std()), 6)
+    sharpe = round((mean_ret * 252) / (vol * np.sqrt(252)), 2) if vol > 0 else None
+    return {
+        "symbol": symbol,
+        "mean_daily_return": mean_ret,
+        "daily_volatility": vol,
+        "sharpe_proxy": sharpe,
+        "sector": sector,
+    }
+
+
+def _avg_pairwise_correlation(returns: pd.DataFrame) -> float | None:
+    """Compute average pairwise correlation from a returns DataFrame."""
+    if len(returns.columns) < 2:
+        return None
+    corr_matrix = returns.corr()
+    mask = np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
+    upper_vals = corr_matrix.where(mask).stack()
+    if len(upper_vals) > 0:
+        return round(float(upper_vals.mean()), 3)
+    return None
+
+
 def compute_portfolio_risk(prices_df: pd.DataFrame, watchlist: dict) -> dict:
     """Compute portfolio-level risk metrics from multi-symbol price data.
 
@@ -347,58 +386,27 @@ def compute_portfolio_risk(prices_df: pd.DataFrame, watchlist: dict) -> dict:
     if prices_df.empty or "close" not in prices_df.columns:
         return {"per_symbol": [], "portfolio": {}, "most_volatile_3": [], "least_volatile_3": []}
 
-    # Build sector mapping
-    symbol_sector = {}
-    for category, symbols in watchlist.items():
-        for s in symbols:
-            if s not in symbol_sector:
-                symbol_sector[s] = category
+    symbol_sector = _build_sector_mapping(watchlist)
 
-    # Pivot to get daily returns per symbol
     pivot = prices_df.pivot_table(index="date", columns="symbol", values="close")
     returns = pivot.pct_change().dropna()
 
     per_symbol = []
     for sym in returns.columns:
-        r = returns[sym].dropna()
-        if len(r) < 2:
-            continue
-        mean_ret = round(float(r.mean()), 6)
-        vol = round(float(r.std()), 6)
-        # Sharpe proxy: annualized return / annualized vol (assuming 252 trading days)
-        sharpe = round((mean_ret * 252) / (vol * np.sqrt(252)), 2) if vol > 0 else None
-        per_symbol.append(
-            {
-                "symbol": sym,
-                "mean_daily_return": mean_ret,
-                "daily_volatility": vol,
-                "sharpe_proxy": sharpe,
-                "sector": symbol_sector.get(sym, "unknown"),
-            }
-        )
+        result = _compute_symbol_risk(returns[sym], sym, symbol_sector.get(sym, "unknown"))
+        if result:
+            per_symbol.append(result)
 
-    # Sort by volatility for most/least volatile
     per_symbol.sort(key=lambda x: x["daily_volatility"])
     least_volatile_3 = [s["symbol"] for s in per_symbol[:3]]
     most_volatile_3 = [s["symbol"] for s in per_symbol[-3:]][::-1]
 
-    # Portfolio-level correlation
-    avg_corr = None
-    if len(returns.columns) >= 2:
-        corr_matrix = returns.corr()
-        # Extract upper triangle (excluding diagonal)
-        mask = np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
-        upper_vals = corr_matrix.where(mask).stack()
-        if len(upper_vals) > 0:
-            avg_corr = round(float(upper_vals.mean()), 3)
-
     # Sector concentration
     sector_counts: dict[str, int] = {}
-    all_symbols = [s["symbol"] for s in per_symbol]
-    for sym in all_symbols:
-        sec = symbol_sector.get(sym, "unknown")
+    for s in per_symbol:
+        sec = s["sector"]
         sector_counts[sec] = sector_counts.get(sec, 0) + 1
-    total = len(all_symbols) or 1
+    total = len(per_symbol) or 1
     sector_concentration = {
         sec: round(count / total * 100, 1) for sec, count in sector_counts.items()
     }
@@ -406,7 +414,7 @@ def compute_portfolio_risk(prices_df: pd.DataFrame, watchlist: dict) -> dict:
     return {
         "per_symbol": per_symbol,
         "portfolio": {
-            "avg_pairwise_correlation": avg_corr,
+            "avg_pairwise_correlation": _avg_pairwise_correlation(returns),
             "sector_concentration": sector_concentration,
         },
         "most_volatile_3": most_volatile_3,
@@ -894,6 +902,26 @@ def _top_insiders(df: pd.DataFrame, owner_col: str | None) -> list[dict]:
     return [{"name": name, "trades": int(count)} for name, count in top.items()]
 
 
+def _parse_trade_entry(
+    row: pd.Series,
+    owner_col: str | None,
+    date_col: str | None,
+    acq_col: str | None,
+    shares_col: str | None,
+) -> dict:
+    """Extract trade fields from a single row, omitting missing/null values."""
+    entry = {}
+    if owner_col and pd.notna(row.get(owner_col)):
+        entry["owner"] = row[owner_col]
+    if date_col and pd.notna(row.get(date_col)):
+        entry["date"] = row[date_col].strftime("%Y-%m-%d")
+    if acq_col and pd.notna(row.get(acq_col)):
+        entry["type"] = "Buy" if str(row[acq_col]).upper().startswith("A") else "Sell"
+    if shares_col and pd.notna(row.get(shares_col)):
+        entry["shares"] = int(row[shares_col])
+    return entry
+
+
 def _recent_trades(
     df: pd.DataFrame,
     owner_col: str | None,
@@ -902,20 +930,11 @@ def _recent_trades(
     shares_col: str | None,
 ) -> list[dict]:
     """Build list of the 5 most recent trades."""
-    recent = []
-    for _, row in df.head(5).iterrows():
-        entry = {}
-        if owner_col and pd.notna(row.get(owner_col)):
-            entry["owner"] = row[owner_col]
-        if date_col and pd.notna(row.get(date_col)):
-            entry["date"] = row[date_col].strftime("%Y-%m-%d")
-        if acq_col and pd.notna(row.get(acq_col)):
-            entry["type"] = "Buy" if str(row[acq_col]).upper().startswith("A") else "Sell"
-        if shares_col and pd.notna(row.get(shares_col)):
-            entry["shares"] = int(row[shares_col])
-        if entry:
-            recent.append(entry)
-    return recent
+    return [
+        entry
+        for _, row in df.head(5).iterrows()
+        if (entry := _parse_trade_entry(row, owner_col, date_col, acq_col, shares_col))
+    ]
 
 
 def compute_sec_activity(filings_df: pd.DataFrame, days: int = 90) -> dict:
