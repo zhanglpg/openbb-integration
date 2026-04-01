@@ -1318,13 +1318,19 @@ def _render_insider_institutional(symbol):
         st.info("No insider trading data available")
     else:
         summary = summarize_insider_activity(insider_df)
-        cols = st.columns(4)
+        exercises = summary.get("option_exercises", 0)
+        ncols = 5 if exercises else 4
+        cols = st.columns(ncols)
         cols[0].metric("Total Trades", summary.get("total_trades", 0))
         cols[1].metric("Buys", summary.get("buys", 0))
         cols[2].metric("Sells", summary.get("sells", 0))
+        net_idx = 3
+        if exercises:
+            cols[3].metric("Option Exercises", exercises)
+            net_idx = 4
         net = summary.get("net_shares")
         if net is not None:
-            cols[3].metric("Net Shares", f"{net:+,}")
+            cols[net_idx].metric("Net Shares", f"{net:+,}")
 
         # Recent trades table
         recent = summary.get("recent_trades", [])

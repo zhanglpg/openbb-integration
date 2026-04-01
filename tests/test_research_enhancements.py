@@ -466,6 +466,13 @@ class TestSummarizeInsiderActivity:
                     "2025-03-01",
                 ],
                 "acquisition_or_disposition": ["A", "D", "A", "A", "D"],
+                "transaction_type": [
+                    "P-Purchase",
+                    "S-Sale",
+                    "P-Purchase",
+                    "P-Purchase",
+                    "S-Sale",
+                ],
                 "securities_transacted": [1000, 500, 2000, 1500, 3000],
                 "owner_name": ["CEO", "CFO", "CEO", "CTO", "CFO"],
             }
@@ -479,6 +486,7 @@ class TestSummarizeInsiderActivity:
         result = summarize_insider_activity(self._make_insider_df())
         assert result["buys"] == 3
         assert result["sells"] == 2
+        assert result["option_exercises"] == 0
 
     def test_net_shares(self):
         """Net shares: +1000 -500 +2000 +1500 -3000 = +1000."""
@@ -522,6 +530,7 @@ class TestSummarizeInsiderActivity:
         assert result["total_trades"] == 1
         assert result["buys"] == 0
         assert result["sells"] == 0
+        assert result["option_exercises"] == 0
 
     def test_missing_shares_column(self):
         """Should handle missing shares column."""
@@ -561,6 +570,72 @@ class TestSummarizeInsiderActivity:
         assert result["buys"] == 0
         assert result["sells"] == 2
         assert result["net_shares"] == -3000
+
+    def test_option_exercise_classification(self):
+        """M-Exempt transactions should be counted as option exercises."""
+        df = pd.DataFrame(
+            {
+                "transaction_date": ["2025-01-10", "2025-01-10", "2025-01-10"],
+                "acquisition_or_disposition": ["A", "D", "A"],
+                "transaction_type": ["M-Exempt", "S-Sale", "P-Purchase"],
+                "securities_transacted": [5000, 3000, 1000],
+                "owner_name": ["CEO", "CEO", "CFO"],
+            }
+        )
+        result = summarize_insider_activity(df)
+        assert result["buys"] == 1
+        assert result["sells"] == 1
+        assert result["option_exercises"] == 1
+
+    def test_transaction_type_display_labels(self):
+        """Recent trades should show rich type labels from transaction_type."""
+        df = pd.DataFrame(
+            {
+                "transaction_date": ["2025-03-01", "2025-03-01", "2025-03-01"],
+                "acquisition_or_disposition": ["A", "D", "A"],
+                "transaction_type": ["M-Exempt", "S-Sale", "P-Purchase"],
+                "securities_transacted": [5000, 3000, 1000],
+                "owner_name": ["CEO", "CEO", "CFO"],
+            }
+        )
+        result = summarize_insider_activity(df)
+        types = [t["type"] for t in result["recent_trades"]]
+        assert "Option Exercise" in types
+        assert "Sell" in types
+        assert "Buy" in types
+
+    def test_fallback_without_transaction_type(self):
+        """Without transaction_type, fall back to A/D classification."""
+        df = pd.DataFrame(
+            {
+                "transaction_date": ["2025-01-10", "2025-01-11"],
+                "acquisition_or_disposition": ["A", "D"],
+                "securities_transacted": [1000, 2000],
+                "owner_name": ["CEO", "CFO"],
+            }
+        )
+        result = summarize_insider_activity(df)
+        assert result["buys"] == 1
+        assert result["sells"] == 1
+        assert result["option_exercises"] == 0
+        types = [t["type"] for t in result["recent_trades"]]
+        assert "Buy" in types
+        assert "Sell" in types
+
+    def test_shares_column_priority(self):
+        """securities_transacted should be preferred over ambiguous 'shares'."""
+        df = pd.DataFrame(
+            {
+                "transaction_date": ["2025-01-10"],
+                "acquisition_or_disposition": ["A"],
+                "securities_transacted": [5000],
+                "shares": [999999],  # post-transaction shares, should be ignored
+                "owner_name": ["CEO"],
+            }
+        )
+        result = summarize_insider_activity(df)
+        assert result["net_shares"] == 5000
+        assert result["recent_trades"][0]["shares"] == 5000
 
 
 # ===================================================================
