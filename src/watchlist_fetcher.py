@@ -40,12 +40,13 @@ class WatchlistFetcher:
         if days is None:
             days = PIPELINE_DEFAULTS["price_lookback_days"]
         try:
-            end_date = datetime.now()
+            end_date = datetime.now() + timedelta(days=1)
             start_date = end_date - timedelta(days=days)
 
             def _call():
                 return obb.equity.price.historical(
                     symbol=symbol,
+                    provider="yfinance",
                     start_date=start_date.strftime("%Y-%m-%d"),
                     end_date=end_date.strftime("%Y-%m-%d"),
                 )
