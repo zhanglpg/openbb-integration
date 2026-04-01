@@ -18,6 +18,17 @@ logger = logging.getLogger(__name__)
 SCHEMA_VERSION = 3
 
 
+def _normalize_date_index(df: pd.DataFrame) -> pd.DataFrame:
+    """Reset a DatetimeIndex or date-named index to a 'date' column formatted as YYYY-MM-DD."""
+    if df.index.name == "date" or isinstance(df.index, pd.DatetimeIndex):
+        df = df.reset_index()
+        if df.columns[0] != "date":
+            df = df.rename(columns={df.columns[0]: "date"})
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+    return df
+
+
 class Database:
     """SQLite database for storing financial data."""
 
@@ -221,59 +232,43 @@ class Database:
     # Price history
     # ==================================================================
 
-    def save_prices(self, df: pd.DataFrame, symbol: str):
-        """Save price data to database using upsert to handle re-runs."""
-        if df is None or df.empty:
-            return
-
-        df = df.copy()
-
-        # Handle date index — OpenBB returns date as index
-        if df.index.name == "date" or isinstance(df.index, pd.DatetimeIndex):
-            df = df.reset_index()
-            if df.columns[0] != "date":
-                df = df.rename(columns={df.columns[0]: "date"})
-
-        if "date" in df.columns:
-            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
-
-        df["symbol"] = symbol
-
-        # Map common column names to our schema
-        column_mapping = {
-            "adjusted_close": "adj_close",
-        }
-        for old_name, new_name in column_mapping.items():
-            if old_name in df.columns and new_name not in df.columns:
-                df = df.rename(columns={old_name: new_name})
-
-        # Select only columns that exist in our schema
-        schema_columns = ["symbol", "date", "open", "high", "low", "close", "volume", "adj_close"]
-        available_columns = [col for col in schema_columns if col in df.columns]
-        df = df[available_columns]
-
-        # Validate required columns
-        required = {"symbol", "date", "close"}
-        missing = required - set(df.columns)
-        if missing:
-            logger.warning("Price data for %s missing required columns: %s", symbol, missing)
-            return
-
-        # Drop invalid rows
+    def _validate_price_rows(self, df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """Drop rows with nulls in required columns or non-positive close prices."""
         before_len = len(df)
         df = df.dropna(subset=["symbol", "date", "close"])
         if len(df) < before_len:
             logger.warning(
                 "Dropped %d rows with null required values for %s", before_len - len(df), symbol
             )
-
         invalid_mask = df["close"] <= 0
         if invalid_mask.any():
             logger.warning(
                 "Dropped %d rows with non-positive close price for %s", invalid_mask.sum(), symbol
             )
             df = df[~invalid_mask]
+        return df
 
+    def save_prices(self, df: pd.DataFrame, symbol: str):
+        """Save price data to database using upsert to handle re-runs."""
+        if df is None or df.empty:
+            return
+
+        df = _normalize_date_index(df.copy())
+        df["symbol"] = symbol
+
+        if "adjusted_close" in df.columns and "adj_close" not in df.columns:
+            df = df.rename(columns={"adjusted_close": "adj_close"})
+
+        schema_columns = ["symbol", "date", "open", "high", "low", "close", "volume", "adj_close"]
+        available_columns = [col for col in schema_columns if col in df.columns]
+        df = df[available_columns]
+
+        missing = {"symbol", "date", "close"} - set(df.columns)
+        if missing:
+            logger.warning("Price data for %s missing required columns: %s", symbol, missing)
+            return
+
+        df = self._validate_price_rows(df, symbol)
         if df.empty:
             return
 
@@ -425,29 +420,23 @@ class Database:
     # Economic indicators
     # ==================================================================
 
+    def _resolve_value_column(self, df: pd.DataFrame, series_id: str) -> pd.DataFrame:
+        """Rename first numeric column to 'value' if 'value' is missing."""
+        if "value" in df.columns:
+            return df
+        exclude = {"series_id", "fetched_at", "date", "id"}
+        numeric = [c for c in df.select_dtypes(include="number").columns if c not in exclude]
+        if numeric:
+            logger.info("Column 'value' not found for %s; using '%s'", series_id, numeric[0])
+            df = df.rename(columns={numeric[0]: "value"})
+        return df
+
     def save_economic_indicators(self, df: pd.DataFrame, series_id: str):
         """Save economic indicator data using INSERT OR REPLACE (atomic)."""
         if df is None or df.empty:
             return
 
-        df = df.copy()
-
-        # Handle date index
-        if df.index.name == "date" or isinstance(df.index, pd.DatetimeIndex):
-            df = df.reset_index()
-            if df.columns[0] != "date":
-                df = df.rename(columns={df.columns[0]: "date"})
-
-        if "date" in df.columns:
-            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
-
-        # Defensive: if 'value' column is missing, use first numeric column
-        if "value" not in df.columns:
-            exclude = {"series_id", "fetched_at", "date", "id"}
-            numeric = [c for c in df.select_dtypes(include="number").columns if c not in exclude]
-            if numeric:
-                logger.info("Column 'value' not found for %s; using '%s'", series_id, numeric[0])
-                df = df.rename(columns={numeric[0]: "value"})
+        df = self._resolve_value_column(_normalize_date_index(df.copy()), series_id)
 
         df["series_id"] = series_id
         now = datetime.now().isoformat()
