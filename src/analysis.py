@@ -4,10 +4,13 @@ Each function takes DataFrames in and returns dicts/lists out.
 No DB access, no OpenBB imports.
 """
 
+import logging
 from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def compute_price_technicals(df: pd.DataFrame, symbol: str) -> dict:
@@ -849,32 +852,55 @@ def summarize_insider_activity(trades_df: pd.DataFrame) -> dict:
         df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
         df = df.sort_values(date_col, ascending=False)
 
-    acq_col = _find_col(df, ["acquisition_or_disposition", "transaction_type"])
-    shares_col = _find_col(df, ["securities_transacted", "shares", "number_of_shares"])
+    acq_col = _find_col(df, ["acquisition_or_disposition"])
+    txn_type_col = _find_col(df, ["transaction_type"])
+    shares_col = _find_col(df, ["securities_transacted", "shares_transacted", "number_of_shares"])
     owner_col = _find_col(df, ["owner_name", "reporting_owner", "insider_name"])
 
-    buys, sells = _count_buys_sells(df, acq_col)
+    logger.debug(
+        "Insider columns: acq=%s, txn_type=%s, shares=%s, owner=%s",
+        acq_col,
+        txn_type_col,
+        shares_col,
+        owner_col,
+    )
+
+    buys, sells, exercises = _count_buys_sells(df, acq_col, txn_type_col)
     net_shares = _compute_net_shares(df, acq_col, shares_col)
     top_insiders = _top_insiders(df, owner_col)
-    recent = _recent_trades(df, owner_col, date_col, acq_col, shares_col)
+    recent = _recent_trades(df, owner_col, date_col, acq_col, shares_col, txn_type_col)
 
     return {
         "total_trades": len(df),
         "buys": buys,
         "sells": sells,
+        "option_exercises": exercises,
         "net_shares": net_shares,
         "top_insiders": top_insiders,
         "recent_trades": recent,
     }
 
 
-def _count_buys_sells(df: pd.DataFrame, acq_col: str | None) -> tuple[int, int]:
-    """Count buy and sell transactions."""
+def _count_buys_sells(
+    df: pd.DataFrame, acq_col: str | None, txn_type_col: str | None = None
+) -> tuple[int, int, int]:
+    """Count buy, sell, and option exercise transactions.
+
+    When ``txn_type_col`` is available the richer SEC transaction codes are used
+    (P-Purchase → buy, S-Sale → sell, M-Exempt → option exercise).  Otherwise
+    falls back to the A/D acquisition_or_disposition flag.
+    """
+    if txn_type_col and txn_type_col in df.columns:
+        upper = df[txn_type_col].str.upper()
+        buys = len(df[upper.str.startswith("P", na=False)])
+        sells = len(df[upper.str.startswith("S", na=False)])
+        exercises = len(df[upper.str.startswith("M", na=False)])
+        return buys, sells, exercises
     if not acq_col:
-        return 0, 0
+        return 0, 0, 0
     buys = len(df[df[acq_col].str.upper().str.startswith("A", na=False)])
     sells = len(df[df[acq_col].str.upper().str.startswith("D", na=False)])
-    return buys, sells
+    return buys, sells, 0
 
 
 def _compute_net_shares(
@@ -902,12 +928,41 @@ def _top_insiders(df: pd.DataFrame, owner_col: str | None) -> list[dict]:
     return [{"name": name, "trades": int(count)} for name, count in top.items()]
 
 
+_TXN_TYPE_MAP = {
+    "P": "Buy",
+    "S": "Sell",
+    "M": "Option Exercise",
+    "A": "Award",
+    "G": "Gift",
+    "F": "Tax",
+    "X": "Option Exercise",
+    "O": "Option Exercise",
+}
+
+
+def _txn_type_label(txn_value: str | None, acq_value: str | None) -> str:
+    """Derive a human-readable trade type label.
+
+    Prefers the richer ``transaction_type`` code when available, falling back
+    to the simple A/D ``acquisition_or_disposition`` flag.
+    """
+    if txn_value and pd.notna(txn_value):
+        first = str(txn_value).strip().upper()[:1]
+        label = _TXN_TYPE_MAP.get(first)
+        if label:
+            return label
+    if acq_value and pd.notna(acq_value):
+        return "Buy" if str(acq_value).upper().startswith("A") else "Sell"
+    return "Unknown"
+
+
 def _parse_trade_entry(
     row: pd.Series,
     owner_col: str | None,
     date_col: str | None,
     acq_col: str | None,
     shares_col: str | None,
+    txn_type_col: str | None = None,
 ) -> dict:
     """Extract trade fields from a single row, omitting missing/null values."""
     entry = {}
@@ -915,8 +970,10 @@ def _parse_trade_entry(
         entry["owner"] = row[owner_col]
     if date_col and pd.notna(row.get(date_col)):
         entry["date"] = row[date_col].strftime("%Y-%m-%d")
-    if acq_col and pd.notna(row.get(acq_col)):
-        entry["type"] = "Buy" if str(row[acq_col]).upper().startswith("A") else "Sell"
+    txn_val = row.get(txn_type_col) if txn_type_col else None
+    acq_val = row.get(acq_col) if acq_col else None
+    if txn_val is not None or acq_val is not None:
+        entry["type"] = _txn_type_label(txn_val, acq_val)
     if shares_col and pd.notna(row.get(shares_col)):
         entry["shares"] = int(row[shares_col])
     return entry
@@ -928,12 +985,15 @@ def _recent_trades(
     date_col: str | None,
     acq_col: str | None,
     shares_col: str | None,
+    txn_type_col: str | None = None,
 ) -> list[dict]:
     """Build list of the 5 most recent trades."""
     return [
         entry
         for _, row in df.head(5).iterrows()
-        if (entry := _parse_trade_entry(row, owner_col, date_col, acq_col, shares_col))
+        if (
+            entry := _parse_trade_entry(row, owner_col, date_col, acq_col, shares_col, txn_type_col)
+        )
     ]
 
 
