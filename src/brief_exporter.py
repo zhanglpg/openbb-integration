@@ -19,6 +19,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent))
 
 from analysis import (
+    _build_sector_mapping,
     compute_macro_snapshot,
     compute_portfolio_risk,
     compute_price_technicals,
@@ -41,11 +42,7 @@ def _build_portfolio_snapshot(db: Database) -> list[dict]:
     if df.empty:
         return []
 
-    symbol_sector = {}
-    for category, symbols in WATCHLIST.items():
-        for s in symbols:
-            if s not in symbol_sector:
-                symbol_sector[s] = category
+    symbol_sector = _build_sector_mapping(WATCHLIST)
 
     results = []
     for symbol in df["symbol"].unique():

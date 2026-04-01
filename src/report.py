@@ -271,36 +271,39 @@ def _sma_crossover_alert(symbol: str, tech: dict, crossover_pct: float) -> dict 
     return None
 
 
+def _symbol_technical_alerts(symbol: str, tech: dict, t: dict) -> list[dict]:
+    """Generate all technical alerts for a single symbol."""
+    alerts = []
+    sma_alert = _sma_crossover_alert(symbol, tech, t.get("sma_crossover_pct", 0.02))
+    if sma_alert:
+        alerts.append(sma_alert)
+    vol_ratio = tech.get("volume_trend_ratio")
+    if vol_ratio is not None and vol_ratio > t.get("volume_surge_ratio", 2.0):
+        alerts.append(
+            {
+                "severity": "info",
+                "category": "volume",
+                "message": f"{symbol}: Volume surge detected ({vol_ratio:.1f}x 20d average)",
+            }
+        )
+    drawdown = tech.get("max_drawdown_pct")
+    if drawdown is not None and drawdown < t.get("drawdown_pct", -15):
+        alerts.append(
+            {
+                "severity": "warning",
+                "category": "risk",
+                "message": f"{symbol}: Max drawdown of {drawdown:.1f}% in lookback period",
+            }
+        )
+    return alerts
+
+
 def _technical_alerts(technicals: dict[str, dict], t: dict) -> list[dict]:
     """Generate alerts from technical indicators (SMA crossovers, volume, drawdown)."""
     alerts = []
-    crossover_pct = t.get("sma_crossover_pct", 0.02)
     for symbol, tech in technicals.items():
-        if "error" in tech:
-            continue
-        sma_alert = _sma_crossover_alert(symbol, tech, crossover_pct)
-        if sma_alert:
-            alerts.append(sma_alert)
-
-        vol_ratio = tech.get("volume_trend_ratio")
-        if vol_ratio is not None and vol_ratio > t.get("volume_surge_ratio", 2.0):
-            alerts.append(
-                {
-                    "severity": "info",
-                    "category": "volume",
-                    "message": f"{symbol}: Volume surge detected ({vol_ratio:.1f}x 20d average)",
-                }
-            )
-
-        drawdown = tech.get("max_drawdown_pct")
-        if drawdown is not None and drawdown < t.get("drawdown_pct", -15):
-            alerts.append(
-                {
-                    "severity": "warning",
-                    "category": "risk",
-                    "message": f"{symbol}: Max drawdown of {drawdown:.1f}% in lookback period",
-                }
-            )
+        if "error" not in tech:
+            alerts.extend(_symbol_technical_alerts(symbol, tech, t))
     return alerts
 
 

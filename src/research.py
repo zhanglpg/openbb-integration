@@ -336,10 +336,8 @@ def screen_opportunities(
 
     for val in valuations:
         symbol = val.get("symbol")
-        if not symbol:
-            continue
         pe = val.get("pe_ratio")
-        if pe is None or pe <= 0 or pe > max_pe:
+        if not symbol or pe is None or pe <= 0 or pe > max_pe:
             continue
         tech = technicals.get(symbol, {})
         if "error" in tech:
