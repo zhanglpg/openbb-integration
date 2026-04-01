@@ -94,14 +94,14 @@ Configured via `.mcp.json` in the project root.
 
 ### Daily Brief Export
 
-The `brief_exporter.py` module generates daily portfolio briefs in markdown format, summarizing:
+The `brief_exporter.py` module exports portfolio data as structured JSON for the brief generator, including:
 - Portfolio performance
 - Key market movements
 - SEC filing activity
 - Economic indicator updates
 
 ```bash
-python src/brief_exporter.py --output /path/to/briefs/
+python src/brief_exporter.py --output /path/to/brief.json
 ```
 
 ## Architecture
@@ -114,7 +114,7 @@ src/
 │   └── retry.py             ← Exponential backoff for API calls
 ├── sec_parser.py            ← SEC EDGAR filings parser
 ├── economic_dashboard.py    ← FRED / macro indicators
-├── database.py              ← SQLite storage (schema v2, upsert-based)
+├── database.py              ← SQLite storage (schema v3, upsert-based)
 ├── storage.py               ← Parquet file storage
 ├── config.py                ← Paths, watchlist, pipeline defaults
 ├── analysis.py              ← Portfolio risk, technicals, valuation screens
