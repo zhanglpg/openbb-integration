@@ -847,6 +847,21 @@ def summarize_insider_activity(trades_df: pd.DataFrame) -> dict:
 
     df = trades_df.copy()
 
+    # Filter out derivative securities (e.g. Restricted Share Units, Stock
+    # Options) to avoid double-counting.  SEC Form 4 reports both sides of an
+    # exercise: an Acquisition of ordinary shares *and* a Disposition of RSUs.
+    # Keeping only the non-derivative rows gives the correct share counts.
+    sec_type_col = _find_col(df, ["security_type", "security_title"])
+    if sec_type_col:
+        _DERIVATIVE_KEYWORDS = ("UNIT", "OPTION", "WARRANT", "RIGHT", "PHANTOM")
+        upper = df[sec_type_col].str.upper()
+        is_derivative = upper.apply(
+            lambda v: any(kw in v for kw in _DERIVATIVE_KEYWORDS) if pd.notna(v) else False,
+        )
+        df = df[~is_derivative]
+        if df.empty:
+            return {"total_trades": 0}
+
     date_col = _find_col(df, ["transaction_date", "filing_date", "date"])
     if date_col:
         df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
@@ -881,20 +896,60 @@ def summarize_insider_activity(trades_df: pd.DataFrame) -> dict:
     }
 
 
+def _classify_txn(txn_value: str | None) -> str | None:
+    """Classify a transaction_type value into buy/sell/exercise/gift/tax/award.
+
+    Handles both single-letter SEC codes (P, S, M, …) and full description
+    strings returned by the SEC provider (e.g. "Exercise or conversion of
+    derivative security exempted pursuant to Rule 16b-3").
+    """
+    if not txn_value or (isinstance(txn_value, float) and pd.isna(txn_value)):
+        return None
+    s = str(txn_value).strip().upper()
+    if not s:
+        return None
+    # Full description strings — check keywords before falling through to
+    # single-char logic so that "Open market … sale" isn't misread as "O".
+    if len(s) > 2:
+        if "EXERCISE" in s or "CONVERSION" in s:
+            return "exercise"
+        if "SALE" in s:
+            return "sell"
+        if "PURCHASE" in s:
+            return "buy"
+        if "GIFT" in s:
+            return "gift"
+    # Single-letter / short SEC codes (P, S, M-Exempt, etc.)
+    first = s[0]
+    if first == "P":
+        return "buy"
+    if first == "S":
+        return "sell"
+    if first in ("M", "X"):
+        return "exercise"
+    if first == "F":
+        return "tax"
+    if first == "G":
+        return "gift"
+    if first == "A":
+        return "award"
+    return None
+
+
 def _count_buys_sells(
     df: pd.DataFrame, acq_col: str | None, txn_type_col: str | None = None
 ) -> tuple[int, int, int]:
     """Count buy, sell, and option exercise transactions.
 
-    When ``txn_type_col`` is available the richer SEC transaction codes are used
-    (P-Purchase → buy, S-Sale → sell, M-Exempt → option exercise).  Otherwise
-    falls back to the A/D acquisition_or_disposition flag.
+    When ``txn_type_col`` is available the richer SEC transaction codes (or
+    full description strings) are used.  Otherwise falls back to the A/D
+    acquisition_or_disposition flag.
     """
     if txn_type_col and txn_type_col in df.columns:
-        upper = df[txn_type_col].str.upper()
-        buys = len(df[upper.str.startswith("P", na=False)])
-        sells = len(df[upper.str.startswith("S", na=False)])
-        exercises = len(df[upper.str.startswith("M", na=False)])
+        classes = df[txn_type_col].map(_classify_txn)
+        buys = int((classes == "buy").sum())
+        sells = int((classes == "sell").sum())
+        exercises = int((classes == "exercise").sum())
         return buys, sells, exercises
     if not acq_col:
         return 0, 0, 0
@@ -928,29 +983,25 @@ def _top_insiders(df: pd.DataFrame, owner_col: str | None) -> list[dict]:
     return [{"name": name, "trades": int(count)} for name, count in top.items()]
 
 
-_TXN_TYPE_MAP = {
-    "P": "Buy",
-    "S": "Sell",
-    "M": "Option Exercise",
-    "A": "Award",
-    "G": "Gift",
-    "F": "Tax",
-    "X": "Option Exercise",
-    "O": "Option Exercise",
+_CLASS_LABEL_MAP = {
+    "buy": "Buy",
+    "sell": "Sell",
+    "exercise": "Option Exercise",
+    "award": "Award",
+    "gift": "Gift",
+    "tax": "Tax",
 }
 
 
 def _txn_type_label(txn_value: str | None, acq_value: str | None) -> str:
     """Derive a human-readable trade type label.
 
-    Prefers the richer ``transaction_type`` code when available, falling back
+    Prefers the richer ``transaction_type`` value when available, falling back
     to the simple A/D ``acquisition_or_disposition`` flag.
     """
-    if txn_value and pd.notna(txn_value):
-        first = str(txn_value).strip().upper()[:1]
-        label = _TXN_TYPE_MAP.get(first)
-        if label:
-            return label
+    cls = _classify_txn(txn_value)
+    if cls:
+        return _CLASS_LABEL_MAP.get(cls, cls.title())
     if acq_value and pd.notna(acq_value):
         return "Buy" if str(acq_value).upper().startswith("A") else "Sell"
     return "Unknown"
