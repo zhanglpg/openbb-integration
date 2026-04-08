@@ -70,10 +70,11 @@ def _seed_db(db, symbols=("AAPL", "MSFT")):
     # Economic indicators
     for series_id in ("VIXCLS", "DGS10", "T10Y2Y"):
         dates = pd.date_range(end=datetime.now().strftime("%Y-%m-%d"), periods=12, freq="MS")
+        date_strs = dates.strftime("%Y-%m-%d")
         econ = pd.DataFrame(
             {
-                "date": dates.strftime("%Y-%m-%d"),
-                "value": [3.5 + i * 0.1 for i in range(12)],
+                "date": date_strs,
+                "value": [3.5 + i * 0.1 for i in range(len(date_strs))],
             }
         )
         db.save_economic_indicators(econ, series_id)
