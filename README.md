@@ -176,14 +176,6 @@ ruff check .
 ruff format --check .
 ```
 
-## Project Documentation
-
-- [`project.md`](project.md) — Original project brief and requirements
-- [`PROJECT_BRIEF_ENHANCEMENT.md`](PROJECT_BRIEF_ENHANCEMENT.md) — Enhanced feature specifications
-- [`IMPROVEMENTS.md`](IMPROVEMENTS.md) — Planned improvements and roadmap
-- [`DASHBOARD.md`](DASHBOARD.md) — Dashboard design notes
-- [`PIPELINE_README.md`](PIPELINE_README.md) — Pipeline architecture details
-
 ## License
 
 MIT
